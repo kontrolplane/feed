@@ -1,0 +1,345 @@
+/* ──────────────────────────────────────────────────────────────
+   SIDEBAR — the navigation rail
+
+   The rail is the one pane you scan rather than read, so everything
+   here serves scanning: four labelled groups instead of one flat list,
+   folders that collapse, and a count column you can run your eye down
+   because the numerals are tabular and zero is blank rather than "-".
+
+   Two scoping decisions, both deliberate:
+
+   1. The outer <aside class="sidebar"> belongs to the shell — it owns
+      the grid column, the drawer transform and the breakpoints. This
+      file styles the rail *inside* that aside, so the two never fight
+      over position or width.
+   2. Every selector is nested under .rail. Class names like .count,
+      .folder and .feed-row are generic enough that another pane could
+      reasonably want them; nesting means nothing here can leak into
+      the list, the reader or a modal.
+   ────────────────────────────────────────────────────────────── */
+
+.rail {
+  display: flex;
+  flex-direction: column;
+  /* height, not min-height: the rail is exactly as tall as the aside
+     so the scrollport below is the only thing that scrolls. No viewport
+     units — the shell decides the aside's height, and below 1280px the
+     aside is a drawer, not a full-height column. */
+  height: 100%;
+  min-height: 0;
+  flex: 1 1 auto;
+  /* the aside is already --rail-w wide (a grid column at >=1280px,
+     min(--rail-w, 84vw) as a drawer below it). Filling it, capped at
+     the token, means the rail can never overflow a narrow drawer and
+     the width still has one source of truth. */
+  width: 100%;
+  max-width: var(--rail-w);
+  background: var(--paper-sub);
+  /* the recessed plane needs one hairline against the paper of the list */
+  border-right: 1px solid var(--rule);
+}
+
+/* The only scrolling region. flex:1 + min-height:0 is what stops a long
+   subscription list from pushing the system section off the bottom —
+   before this the whole rail scrolled, so "settings" was unreachable in
+   practice once you had more than a screenful of feeds. */
+.rail .rail-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding-bottom: var(--sp-3);
+  scrollbar-color: var(--rule-strong) transparent;
+  /* As a drawer this sits over the list. Without containment a flick
+     that reaches the end of the subscriptions keeps going and scrolls
+     the pane underneath — which on iOS then chains to the document
+     and drags the whole app off the top of the screen. */
+  overscroll-behavior: contain;
+}
+/* the shared thumb is cut with a --paper border; on the recessed rail
+   that reads as a light seam, so match the rail's own ground */
+.rail .rail-scroll::-webkit-scrollbar-thumb { border-color: var(--paper-sub); }
+
+.rail .nav-group + .nav-group { border-top: 1px solid var(--rule); }
+
+/* ══ SECTION HEADS ══
+   Sticky to the top of the scrollport, so on a long list you always
+   know whether the rows under the cursor are views, timeline or
+   folders. The opaque --paper-sub is load-bearing: without it the rows
+   scroll visibly through the head. */
+.rail .nav-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  min-height: 26px;
+  padding: var(--sp-3) var(--pane-x) var(--sp-1);
+  background: var(--paper-sub);
+}
+/* the add-folder button sits on the head's optical line, so it is
+   trimmed from the shared 28px icon button and pulled flush right */
+.rail .nav-head .btn-icon {
+  width: 22px;
+  height: 22px;
+  margin-right: -3px;
+  flex: 0 0 auto;
+}
+
+/* ══ ROWS ══
+   One grid for every row in the rail — glyph, label, count — so the
+   labels of a view, a folder and a feed all start on the same x and
+   every count ends on the same x. The old rail aligned nothing, and
+   spent its first column on 01/02/03 numerals that named nothing. */
+.rail .nav-row,
+.rail .folder-row {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr) auto;
+}
+/* no glyph column for feeds: they indent to the label rail instead, so
+   the nesting is legible without another icon to parse */
+.rail .feed-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding-left: calc(var(--pane-x) + 14px + var(--sp-2));
+}
+
+.rail .nav-row,
+.rail .folder-row,
+.rail .feed-row {
+  position: relative;
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: 28px;
+  padding-top: 3px;
+  padding-bottom: 3px;
+  padding-right: var(--pane-x);
+  font-family: var(--font-mono);
+  font-size: var(--fs-label);
+  letter-spacing: 0.01em;
+  color: var(--ink-3);
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease),
+              color var(--dur-fast) var(--ease);
+}
+.rail .nav-row,
+.rail .folder-row { padding-left: var(--pane-x); }
+
+.rail .nav-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rail .nav-row:hover,
+.rail .folder-row:hover,
+.rail .feed-row:hover {
+  background: var(--tint);
+  color: var(--ink);
+}
+
+/* ACTIVE — the app's one strong accent. A filled navy plate plus a 2px
+   marker at the rail's edge: on the dark plate the fill alone is a
+   subtler shift than it is on cream, and the bar keeps the "you are
+   here" reading identical in both themes. */
+.rail .nav-row.active,
+.rail .folder-row.active,
+.rail .feed-row.active {
+  background: var(--navy);
+  color: var(--on-navy);
+}
+.rail .nav-row.active::before,
+.rail .folder-row.active::before,
+.rail .feed-row.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--on-navy);
+}
+
+/* Glyphs are decoration and must never out-shout the label, so they sit
+   a rung below it on the ink ladder. The colour is scoped to rows so the
+   same svg inside a .btn or .btn-icon keeps that control's currentColor. */
+.rail .rail-ic {
+  flex: 0 0 auto;
+  display: block;
+}
+.rail .nav-row > .rail-ic,
+.rail .folder-row > .rail-ic {
+  color: var(--ink-4);
+  transition: color var(--dur-fast) var(--ease);
+}
+.rail .nav-row:hover > .rail-ic,
+.rail .folder-row:hover > .rail-ic { color: var(--ink-2); }
+.rail .nav-row.active > .rail-ic,
+.rail .folder-row.active > .rail-ic { color: var(--on-navy-3); }
+
+/* ══ COUNTS ══
+   Right-aligned and tabular (.count carries font-variant-numeric from
+   base.css) so the column does not twitch when 9 becomes 10. */
+.rail .count {
+  justify-self: end;
+  font-size: var(--fs-micro);
+  letter-spacing: 0.04em;
+  color: var(--ink-4);
+  transition: color var(--dur-fast) var(--ease);
+}
+/* An unread count is the one number in the rail worth looking at, so it
+   steps up two rungs — but only when there is something unread. The
+   :not(:empty) is what lets zero disappear instead of rendering as a
+   dash you have to read in order to dismiss. */
+.rail .count-unread:not(:empty) {
+  color: var(--ink-2);
+  font-weight: 500;
+}
+.rail .nav-row.active .count,
+.rail .folder-row.active .count,
+.rail .feed-row.active .count { color: var(--on-navy-3); }
+
+/* A view with nothing in it is still worth showing — it tells you
+   "starred" exists — but not at the weight of one with items. Scoped to
+   .nav-group so the system rows, which have no count to be zero, are
+   not dimmed by the same rule. */
+.rail .nav-group .nav-row.is-zero { color: var(--ink-4); }
+.rail .nav-group .nav-row.is-zero:hover { color: var(--ink); }
+.rail .nav-group .nav-row.is-zero.active { color: var(--on-navy); }
+
+/* ══ FOLDERS ══
+   <details>/<summary> does the collapsing, so it works with javascript
+   disabled, is a real disclosure widget to a screen reader, and answers
+   space/enter without a keydown handler. The behaviour agent only has
+   to remember the state, not implement the control. */
+.rail .folder > summary { list-style: none; }
+.rail .folder > summary::-webkit-details-marker { display: none; }
+.rail .folder > summary::marker { content: ''; }
+
+/* The folder label is an <a href> inside the summary. htmx calls
+   preventDefault() on a click routed through an anchor with an href,
+   and a cancelled click cannot run the summary's activation behaviour —
+   so navigating into a folder does not also toggle it. With javascript
+   off the click is a plain page load and the toggle is moot. Clicking
+   anywhere else on the row (chevron, count, gutter) toggles. */
+.rail .folder-link {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.rail .rail-chev { transition: transform var(--dur-fast) var(--ease); }
+.rail .folder[open] > .folder-row .rail-chev { transform: rotate(90deg); }
+
+.rail .feed-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Feed rows are quieter than the folder that owns them; the hairline in
+   the gutter is what carries the nesting once a folder runs past a
+   screenful and its summary has scrolled away. */
+.rail .feed-list {
+  position: relative;
+  padding-bottom: var(--sp-1);
+}
+.rail .feed-list::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: var(--sp-1);
+  left: calc(var(--pane-x) + 6px);
+  width: 1px;
+  background: var(--rule);
+}
+.rail .feed-row { color: var(--ink-4); }
+
+/* ══ EMPTY ══
+   The shared empty-state is sized for a full pane; in a 264px rail its
+   padding and 20px title wrap to five lines. Same shape, rail
+   proportions, and it keeps the way forward the old rail never offered:
+   a button straight into the add-feed modal. */
+.rail .rail-empty {
+  padding: var(--sp-4) var(--pane-x);
+  gap: var(--sp-2);
+}
+.rail .rail-empty .es-title { font-size: var(--fs-h4); }
+.rail .rail-empty .es-hint { font-size: var(--fs-nano); }
+.rail .rail-empty .btn { margin-top: var(--sp-1); }
+
+/* ══ SYSTEM ══
+   Outside the scrollport and pushed to the floor of the rail, so
+   "manage feeds" and "settings" are in the same place whether you have
+   three feeds or three hundred. */
+.rail .rail-system {
+  margin-top: auto;
+  flex: 0 0 auto;
+  padding-bottom: var(--sp-2);
+  background: var(--paper-sub);
+  border-top: 1px solid var(--rule);
+}
+
+/* ══ RESPONSIVE ══
+   The breakpoints match app.js's mqDrawer/mqOnePane character for
+   character — see the header of shell.css for why `.98` is not used
+   anywhere in this app.
+
+   Below 1280px the shell turns the aside into an overlay drawer and
+   draws its own edge; two adjacent hairlines read as a 2px seam. */
+@media (max-width: 1279px) {
+  .rail {
+    border-right: 0;
+    max-width: none;
+  }
+}
+
+/* Below 960px the rail is driven by a thumb. Every row here is a
+   navigation target, and at 28px — or at the 32px this used to use —
+   a miss lands on the row above or below, which is not a no-op: it
+   navigates somewhere else and swaps the whole main pane. --touch is
+   44px, defined on .app in shell.css.
+
+   The drawer is min(264px, 84vw) wide, so at 360px it is 302px: a row
+   at 44px tall holding a 13px label still leaves ~240px of label
+   before the ellipsis, which is more than the 12px label had at
+   264px. Nothing has to be truncated harder to pay for the height. */
+@media (max-width: 959px) {
+  .rail .nav-row,
+  .rail .folder-row,
+  .rail .feed-row {
+    min-height: var(--touch);
+    font-size: var(--fs-code);
+  }
+  /* The add-folder button in the folders head is a real target and has
+     to reach 44px too. Sizing the head itself to exactly --touch with
+     no vertical padding is what stops that button from inflating one
+     head to 66px while the other three stay at 36: every head is now
+     the same 44px, the button fills its content box exactly, and the
+     groups are separated by .nav-group's border-top rather than by
+     padding. Costs 24px across the four heads versus the desktop rail. */
+  .rail .nav-head {
+    min-height: var(--touch);
+    padding: 0 var(--pane-x);
+  }
+  .rail .nav-head .btn-icon {
+    width: var(--touch);
+    height: var(--touch);
+    /* the 22px button was pulled 3px right to put its glyph on the
+       eyebrow's optical line; at 44px the glyph sits 15px inside its
+       own box, so the pull has to grow with it — --sp-3 lands the
+       glyph within a pixel of the --pane-x text rail */
+    margin-right: calc(var(--sp-3) * -1);
+  }
+
+  /* the "you are here" marker is 2px, which is a hairline on a phone
+     screen at 3x — the plate carries the state, but the marker should
+     be visible as well as present */
+  .rail .nav-row.active::before,
+  .rail .folder-row.active::before,
+  .rail .feed-row.active::before { width: 3px; }
+}

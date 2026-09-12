@@ -1,0 +1,237 @@
+/* ──────────────────────────────────────────────────────────────
+   MODALS — add feed, add folder, and the folder picker they share.
+
+   WHY <dialog> REPLACED THE HAND-ROLLED SCRIM
+   The previous implementation was a plain <div class="scrim"> holding a
+   <div class="modal">, closed by onclick handlers that set
+   #modal.innerHTML = ''. That shape cannot be made correct in CSS,
+   because everything it was missing is behaviour:
+
+     · tab walked straight out of the panel into the page behind it
+     · Escape did nothing
+     · focus was never restored to the control that opened the modal
+     · no aria-modal, no accessible name, so a screen reader was never
+       told it had entered a dialog
+     · the page behind still scrolled
+     · the scrim's onclick fired on any click that bubbled to it, which
+       is why the panel carried onclick="event.stopPropagation()"
+
+   The native <dialog> opened with showModal() gives every one of those
+   for free, plus the top layer (so z-index stacking against the paper
+   grain and the progress bar stops being a negotiation) and a real
+   ::backdrop pseudo-element. app.js only has to call showModal() and
+   clear the host on close. Nothing below re-implements any of it.
+   ────────────────────────────────────────────────────────────── */
+
+/* The scrim is the one surface no existing token fits: --navy is dark
+   on the light plate but light on the dark one, so using it directly
+   would wash a night-time app with a pale veil. Derived from the two
+   base inks in whichever direction is currently the dark one. */
+:root            { --modal-scrim: color-mix(in srgb, var(--navy)  56%, transparent); }
+[data-theme="dark"] { --modal-scrim: color-mix(in srgb, var(--cream) 74%, transparent); }
+
+/* ══ PANEL ══ */
+dialog.modal {
+  /* no width/height/inset of our own: the UA's dialog rules already
+     centre a modal dialog with inset:0 + margin:auto, and it only stays
+     centred while the block size is content-sized. max-height is safe,
+     height is not. */
+  width: min(520px, calc(100vw - var(--sp-4) * 2));
+  max-width: none;
+  max-height: min(80dvh, 680px);
+
+  padding: 0;
+  border: 1px solid var(--rule-strong);
+  background: var(--paper-2);
+  color: var(--ink);
+  box-shadow: var(--shadow-panel);
+
+  /* flex column so the body scrolls and the actions inside it can never
+     be pushed below the fold by a long folder list */
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+/* overriding display: flex would otherwise defeat the UA's
+   `dialog:not([open]) { display: none }` and leave the panel on screen */
+dialog.modal:not([open]) { display: none; }
+
+dialog.modal::backdrop {
+  background: var(--modal-scrim);
+  /* just enough to separate the panel from three panes of dense text
+     behind it without turning the app into frosted glass */
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+}
+
+/* entry only — there is no matching exit, because the dialog leaves the
+   top layer the instant close() runs and an exit animation would need
+   allow-discrete plumbing for 200ms of decoration */
+dialog.modal[open] { animation: modal-rise var(--dur) var(--ease); }
+dialog.modal[open]::backdrop { animation: modal-wash var(--dur-fast) ease; }
+
+@keyframes modal-rise {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes modal-wash {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* ══ HEAD ══ */
+.modal-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-2) var(--sp-2) var(--sp-4);
+  border-bottom: 1px solid var(--rule);
+  background: var(--paper-sub);
+}
+
+/* the close control sits in a <form method="dialog"> so it closes
+   natively; the form itself must not add layout */
+.modal-close-form { display: flex; }
+
+/* ══ BODY ══ */
+.modal-body {
+  flex: 1 1 auto;
+  min-height: 0;          /* without this the flex item refuses to shrink
+                             and the panel grows past max-height */
+  padding: var(--sp-4);
+}
+
+.modal-title {
+  font-family: var(--font-sans);
+  font-size: var(--fs-h2);
+  font-weight: 700;
+  line-height: var(--lh-heading);
+  letter-spacing: -0.03em;
+  color: var(--ink);
+}
+
+.modal-lead { margin-top: var(--sp-1); }
+
+.modal-form { margin-top: var(--sp-4); }
+
+.modal-field + .modal-field,
+.modal-field + .folder-picker { margin-top: var(--sp-3); }
+
+/* ══ ACTIONS ══ */
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+  margin-top: var(--sp-4);
+}
+/* the subscribe step is long enough that the buttons need separating
+   from the fields above them */
+.modal-actions-ruled {
+  border-top: 1px solid var(--rule);
+  padding-top: var(--sp-3);
+}
+
+/* ══ ERROR ══
+   Both modals used to close on every response, success or failure, so a
+   rejected request was indistinguishable from an accepted one. This is
+   the region that says otherwise; role="alert" is in the markup. */
+.modal-error {
+  margin-top: var(--sp-3);
+  padding: var(--sp-2) var(--sp-2);
+  border-left: 2px solid var(--err);
+  background: var(--err-tint);
+  font-size: var(--fs-label);
+  line-height: var(--lh-body);
+  color: var(--err);
+}
+.modal-error[hidden] { display: none; }
+
+/* ══ PROBE BUTTON BUSY STATE ══
+   A square that spins, because the system has no radius. Opacity is
+   driven by .htmx-indicator in base.css; it keeps its 10px of width at
+   all times so the button does not resize mid-request. */
+.probe-spinner {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border: 1.5px solid currentColor;
+  border-right-color: transparent;
+  animation: probe-spin calc(var(--dur) * 3) linear infinite;
+}
+@keyframes probe-spin { to { transform: rotate(360deg); } }
+
+/* the disabled submit must read as unavailable, not merely unresponsive */
+.modal-form button[disabled],
+.modal-actions button[disabled] { opacity: 0.55; }
+
+/* ══ PROBE NOTE ══
+   Replaces the fake "discovered feeds / ok" table. It states only what
+   the server actually knows at this point: the url, and that it will be
+   stored. See the comment on ProbeResults in addfeed.templ. */
+.probe-note {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  padding: var(--sp-3);
+  border: 1px solid var(--rule);
+  border-left: 2px solid var(--rule-strong);
+  background: var(--tint);
+}
+.probe-note-url {
+  font-family: var(--font-mono);
+  font-size: var(--fs-label);
+  line-height: var(--lh-body);
+  color: var(--ink);
+  overflow-wrap: anywhere;   /* a long feed url must wrap, not widen the
+                                panel past its max-width */
+}
+.probe-note-hint {
+  font-size: var(--fs-micro);
+  line-height: var(--lh-body);
+  color: var(--ink-4);
+}
+
+/* the hidden feed_url input sits between the note and the first
+   field, so this has to be a general sibling, not an adjacent one */
+.probe-note ~ .modal-field { margin-top: var(--sp-3); }
+
+/* ══ FOLDER PICKER ══
+   Shared with ManageFeedEdit. The reveal of the "new folder" input is
+   the plain `hidden` attribute now; it used to be an inline
+   style="display:none" driven by a 200-character onchange string. */
+.folder-picker-new { margin-top: var(--sp-2); }
+/* the attribute has to beat any display this file sets on the wrapper */
+.folder-picker-new[hidden] { display: none; }
+
+/* ══════════════════════════════════════════════════════════════
+   SHEET — below 640px
+   A centred 520px box on a 380px phone is the wrong shape: it floats,
+   its actions land mid-screen, and the keyboard covers them. Docked to
+   the bottom edge the panel behaves like a sheet, the fields sit
+   directly above the keyboard, and the actions stay reachable by thumb.
+   `margin: auto auto 0` overrides the UA's centring margin.
+   ══════════════════════════════════════════════════════════════ */
+@media (max-width: 640px) {
+  dialog.modal {
+    width: 100%;
+    max-width: 100%;
+    max-height: 88dvh;
+    margin: auto auto 0;
+    border-left: 0;
+    border-right: 0;
+    border-bottom: 0;
+  }
+  dialog.modal[open] { animation: modal-slide var(--dur) var(--ease); }
+  @keyframes modal-slide {
+    from { transform: translateY(18px); opacity: 0; }
+    to   { transform: translateY(0); opacity: 1; }
+  }
+
+  .modal-head { padding-left: var(--sp-3); }
+  .modal-body { padding: var(--sp-3); }
+
+  /* every action is a thumb target at this width */
+  .modal-actions .btn { min-height: 34px; flex: 1 1 auto; }
+}

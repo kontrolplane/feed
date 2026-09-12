@@ -1,0 +1,614 @@
+/* ──────────────────────────────────────────────────────────────
+   MANAGE
+
+   ══ THE SPACE PROBLEM ══
+   shell.css hands this page BOTH content columns — everything to the
+   right of the rail, ~1340px on a 1600px screen. It used to render
+   into that as an 880px column of 280px cards: a strip of postage
+   stamps with a dead half-screen beside it, which is what "the usage
+   of space on the system pages is not correct" is describing. The
+   page is now a document at a deliberate width, centred, matching
+   settings.css exactly (two reading measures plus a gutter) so the
+   two system pages sit on the same page shape instead of each
+   picking their own.
+
+   ══ THE PRIMITIVE ══
+   A table, replacing a `repeat(auto-fill, minmax(280px, 1fr))` grid
+   of cards. Cards are the wrong shape for this content three times
+   over:
+
+     · A subscription is four short fields, read by COMPARISON —
+       "which of these points at the wrong url", "what is in this
+       folder", "do I still want this one". In a card grid each field
+       lands at a different x position in every card, so the eye can
+       never run down a column; in a table every title shares a left
+       edge and every url sits under the last.
+     · Density. A card was floored at 256px tall to stop the grid
+       reflowing when one flipped into its edit state, so twelve feeds
+       filled a screen and sixty were a scrolling expedition. A row is
+       one line. The same screen now holds ~20 feeds, and the page
+       stops being a place you dread opening.
+     · Truncation. A 280px card truncates a url to nothing useful. A
+       row gives it ~40% of 1100px.
+
+   A <table> and not a grid of <div>s with ARIA bolted on, because
+   the column headers are the part that makes this readable with a
+   screen reader — every cell is announced with the name of its
+   column, for free. The redundant role="" attributes exist for one
+   reason: below 640px the table is restyled into stacked blocks with
+   `display: block`, which strips the native table semantics out of
+   the accessibility tree. The roles put them back.
+
+   ══ ROW STATES ══
+   Three of them share one <tr>: default, .confirming, .editing, all
+   swapped in place by htmx. The confirm and edit states collapse the
+   four cells into one <td colspan="4"> panel, which is the reason
+   this layout is calmer than the card grid was: a panel can only
+   push the rows BELOW it down, and it does so while the reader's
+   focus is inside it (cancel and the first field both autofocus).
+   The card grid moved every sibling in the row sideways as well.
+   ────────────────────────────────────────────────────────────── */
+
+.manage-page {
+  /* The page measure, derived rather than picked, and identical to
+     .settings-doc: two reader columns and the gutter that would sit
+     between them, ~1115px at the 13px mono body size. Wide enough
+     that four columns are comfortable, narrow enough that a title
+     and its actions are not at opposite ends of a 1600px screen. */
+  --manage-doc-w: calc(var(--measure) * 2 + var(--sp-6));
+  /* WCAG 2.5.8 target size. Local, like settings' --s-touch: no
+     other pane needs a floor, and tokens.css is owned elsewhere. */
+  --manage-touch: 44px;
+  /* row rhythm, one value so the head, the rows and the group heads
+     cannot drift apart */
+  --manage-cell-y: var(--sp-2);
+  /* The floor shared by the confirm and the edit panel, set by the
+     taller of the two (the edit form: one row of labelled fields
+     plus its buttons). Flipping between the two states is then a
+     change of content, not of height, so nothing below the row
+     moves twice. min-height, not height, so a wrapped url or a
+     revealed "new folder" input grows it instead of being clipped. */
+  --manage-panel-h: 132px;
+
+  /* No grid-area / position: shell.css owns pane placement. The pane
+     owns its own scrollport so the swapped-in page starts at the top
+     rather than inheriting the list's scroll offset. */
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--paper);
+}
+
+.manage-scroll {
+  flex: 1;
+  min-height: 0;
+}
+
+.manage-doc {
+  max-width: var(--manage-doc-w);
+  margin: 0 auto;
+  padding: var(--sp-5) var(--pane-x) var(--sp-6);
+}
+
+/* ══ HEADER ══ */
+
+.manage-head .eyebrow { display: block; margin-bottom: var(--sp-2); }
+.manage-head .pane-title { margin-bottom: var(--sp-2); }
+
+/* ══ TOOLBAR ══
+   filter, order, then the two add buttons pushed to the far edge.
+   Everything here is a base.css primitive (.field, .field-label,
+   .seg-control, .btn) rather than a control restyled for this page,
+   so a change to the system reaches this page too.
+
+   align-items: flex-end because each control is a label stacked over
+   its own box; without it the two boxes sit at different heights
+   whenever the labels wrap differently. */
+.manage-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--sp-3);
+  margin-top: var(--sp-4);
+  padding-bottom: var(--sp-3);
+  border-bottom: 1px solid var(--rule-strong);
+}
+
+.manage-bar-filter {
+  flex: 1 1 26ch;
+  min-width: 0;
+  max-width: 44ch;
+}
+.manage-bar-sort { flex: 0 0 auto; }
+.manage-bar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin-left: auto;
+}
+
+/* THE FILTER — the single biggest usability win on this page and the
+   reason it is worth 40 lines of page-local javascript. Past about
+   fifteen feeds, "where did I file that" is the only question anyone
+   opens this screen to answer, and answering it by eye means reading
+   every folder. Typing three characters answers it instead. It is
+   client-side: there is no route for it, and there does not need to
+   be, because every row is already in the document. */
+.manage-filter { position: relative; }
+
+.manage-filter-input {
+  /* room for the clear button that overlays the right end */
+  padding-right: var(--sp-5);
+}
+/* the native one is a second, differently-styled clear control
+   sitting next to ours */
+.manage-filter-input::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+/* :placeholder-shown reads the live value, so the button appears and
+   disappears with the text without javascript — and display:none
+   keeps it out of the tab order while there is nothing to clear,
+   which opacity:0 would not. (manage.js also clears on Escape, for
+   the keyboard.) */
+.manage-filter-clear {
+  position: absolute;
+  top: 0;
+  right: 0;
+  height: 100%;
+  width: var(--sp-5);
+}
+.manage-filter-input:placeholder-shown ~ .manage-filter-clear { display: none; }
+
+/* the drawn cross replacing the fullwidth '＋' glyph. it must not be
+   squashed by the button's flex layout when the label is long. */
+.manage-plus { flex: 0 0 auto; }
+
+/* ══ INVENTORY LINE ══
+   Doubles as the filter's result count ("showing 3 of 42 feeds"),
+   which is why it is aria-live in the markup: rows vanishing in
+   silence is not a result a screen reader can perceive. .tnum sits
+   on the element itself rather than on inner spans because the
+   script rewrites its text wholesale. */
+.manage-count {
+  margin-top: var(--sp-3);
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  letter-spacing: 0.08em;
+  color: var(--ink-4);
+}
+
+.manage-empty { border: 1px solid var(--rule); margin-top: var(--sp-4); }
+
+/* ══════════════════════════════════════════════════════════════
+   THE TABLE
+   ══════════════════════════════════════════════════════════════ */
+
+/* table-layout: fixed so the columns are decided by the header and
+   not by whichever feed has the longest url — the auto algorithm
+   lets one 300-character link set the shape of the whole page. */
+.manage-table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  margin-top: var(--sp-3);
+}
+
+.manage-table th,
+.manage-table td {
+  text-align: left;
+  vertical-align: middle;
+  padding: var(--manage-cell-y) var(--sp-3) var(--manage-cell-y) 0;
+}
+.manage-table th:last-child,
+.manage-table td:last-child { padding-right: 0; }
+
+/* COLUMN WIDTHS — set on the head only, because that is where the
+   fixed algorithm reads them, and because the body cells are turned
+   into blocks below 640px where a width would fight the stack. */
+.manage-table thead .mt-feed   { width: 32%; }
+.manage-table thead .mt-folder { width: 20ch; }
+.manage-table thead .mt-act    { width: 16ch; }
+
+/* the head sticks to the top of the scrollport: on a sixty-feed list
+   the column names are otherwise gone by the second screen, which is
+   exactly when a table stops being readable. It needs an opaque
+   ground or the rows show through — and its rule is an inset shadow
+   rather than a border, because a collapsed-border table paints cell
+   borders on the table itself, so a sticky cell's own border scrolls
+   away from underneath it and the head floats untethered. */
+.manage-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--paper);
+  box-shadow: inset 0 -1px 0 var(--rule-strong);
+  font-family: var(--font-mono);
+  font-size: var(--fs-nano);
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  color: var(--ink-3);
+}
+
+.manage-table tbody tr { border-bottom: 1px solid var(--rule); }
+
+/* Rows hidden by the filter. The attribute selector outranks every
+   display rule in this file — including `tr { display: block }` in
+   the stacked layout — so one declaration covers both layouts. */
+.manage-table tr[hidden] { display: none; }
+
+/* ══ FEED ROW ══ */
+
+.manage-row {
+  transition: background-color var(--dur-fast) ease;
+}
+.manage-row:hover,
+.manage-row:focus-within { background: var(--paper-2); }
+
+/* .no-lower in the markup keeps the title and the url as their
+   authors wrote them — the global lowercase rule is our voice, and
+   these two strings are not ours. */
+.manage-title {
+  display: block;
+  font-family: var(--font-sans);
+  font-size: var(--fs-h4);
+  font-weight: 600;
+  line-height: var(--lh-heading);
+  letter-spacing: -0.015em;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The url was truncated server-side by TruncateURL, which cuts at 40
+   *bytes* and so can slice a multi-byte character in half. The full
+   url is rendered instead and cut here, where the cut is made of
+   glyphs and reverses itself when the column is wide; the untruncated
+   value stays available through the title attribute. */
+.manage-url {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  color: var(--ink-4);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* a boxed tag rather than plain text: the folder is the one field on
+   the row that is also a control elsewhere in the app, and the box
+   is what stops it reading as a second url */
+.manage-folder-tag {
+  display: inline-block;
+  max-width: 100%;
+  padding: 2px 6px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-nano);
+  letter-spacing: 0.08em;
+  color: var(--ink-3);
+  background: var(--tint);
+  border: 1px solid var(--rule);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: baseline;
+}
+/* signalled by the dashed rule and the word, never by colour alone */
+.manage-folder-tag-unfiled {
+  color: var(--warn);
+  border-style: dashed;
+  border-color: var(--warn);
+  background: transparent;
+}
+
+/* the column name, shown only in the stacked layout where the table
+   head is gone. display:none keeps it out of the accessibility tree
+   above that width, where <th scope="col"> already names the cell. */
+.mt-label {
+  display: none;
+  font-family: var(--font-mono);
+  font-size: var(--fs-nano);
+  letter-spacing: 0.1em;
+  color: var(--ink-4);
+}
+
+/* ACTIONS — always visible, never revealed on hover. A hover-only
+   control does not exist on a touch screen and cannot be found by
+   anyone tabbing, and "remove" is not a control to make people hunt
+   for. .btn-ghost rather than the hairline default because sixty
+   rows of outlined buttons is a page of boxes; the ghost gets its
+   rule on hover and focus. */
+.manage-acts {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--sp-1);
+}
+.mt-act { text-align: right; }
+
+.manage-act-danger:hover {
+  color: var(--err);
+  border-color: var(--err);
+  background: var(--err-tint);
+}
+
+/* ══ GROUP HEAD ══
+   One row per folder, spanning the table, carrying the name, the
+   count and the folder's own remove control. It is an <h2> inside
+   the cell rather than a <th scope="rowgroup">, because rowgroup
+   scope is only meaningful with one <tbody> per folder — and one
+   tbody per folder would make the a-z order a cross-tbody move.
+   The heading also gives screen readers folder-to-folder navigation,
+   which a header cell would not. */
+.manage-group { border-bottom-color: var(--rule-strong); }
+.manage-group > td { padding-top: var(--sp-5); padding-bottom: var(--sp-1); }
+.manage-group:first-child > td { padding-top: var(--sp-3); }
+
+.manage-group-inner {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--sp-1) var(--sp-2);
+}
+
+.manage-group-name {
+  font-family: var(--font-sans);
+  font-size: var(--fs-h3);
+  font-weight: 600;
+  line-height: var(--lh-heading);
+  letter-spacing: -0.025em;
+  color: var(--ink);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.manage-group-count {
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  letter-spacing: 0.08em;
+  color: var(--ink-4);
+  white-space: nowrap;
+}
+
+/* the unfiled group's explanation. it is the only group the reader
+   did not create, so it has to say why it exists. */
+.manage-group-note {
+  flex: 1 1 24ch;
+  min-width: 0;
+  font-size: var(--fs-micro);
+  line-height: var(--lh-body);
+  color: var(--warn);
+}
+
+/* the destructive folder control is pushed to the far edge so it is
+   never adjacent to anything a reader might click by reflex */
+.manage-group-remove { margin-left: auto; }
+.manage-group-remove:hover {
+  color: var(--err);
+  border-color: var(--err);
+  background: var(--err-tint);
+}
+
+/* In the a-z order the folders are not the structure any more, so
+   their heads and their empty-state rows come out. They are hidden
+   rather than removed, so the order control is reversible with no
+   server round-trip. */
+.manage-table[data-sort="title"] .manage-group,
+.manage-table[data-sort="title"] .manage-empty-row { display: none; }
+
+/* ══ EMPTY AND NO-MATCH ROWS ══
+   A folder with no feeds used to render as a heading with nothing
+   under it — a dead end that looked like a bug. A filter that matches
+   nothing used to be impossible because there was no filter; now it
+   has to say so, or an empty table reads as a broken page. */
+.manage-empty-inner,
+.manage-nomatch-inner {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  padding: var(--sp-2) 0;
+  font-size: var(--fs-label);
+  color: var(--ink-4);
+}
+
+.manage-inline-add {
+  font-family: var(--font-mono);
+  font-size: var(--fs-label);
+  letter-spacing: 0.05em;
+  color: var(--ink-2);
+  border-bottom: 1px solid var(--rule-strong);
+  transition: color var(--dur-fast) ease, border-color var(--dur-fast) ease;
+}
+.manage-inline-add:hover { color: var(--ink); border-color: var(--navy); }
+
+/* ══════════════════════════════════════════════════════════════
+   PANEL STATES — .confirming and .editing
+   Both collapse the row to a single colspan="4" cell. The panel is a
+   flex column with its buttons pushed to the floor, so the two
+   states are the same height and flipping between them does not
+   move the table twice.
+   ══════════════════════════════════════════════════════════════ */
+
+.mt-panel { padding-right: 0; }
+
+.manage-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  min-height: var(--manage-panel-h);
+  padding: var(--sp-3);
+  border-left: 3px solid var(--ink-4);
+  background: var(--paper-2);
+}
+
+/* prose does not get to be 1100px wide just because the panel is */
+.manage-panel-text { max-width: 72ch; }
+
+/* DESTRUCTIVE ORDERING — cancel is first in the DOM (so it is the
+   first tab stop, and it carries the autofocus) and is the plain
+   .btn; the irreversible action is second and carries the fill. The
+   old card had the danger button as the visually dominant one, which
+   is exactly backwards for an action with no undo.
+   Left-aligned, under the sentence they answer: right-aligned
+   buttons in a 1100px panel end up a screen away from the question. */
+.manage-panel-acts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin-top: auto;
+}
+
+/* ══ CONFIRM ══
+   Tinted as well as ruled in --err, so the row is unmistakable
+   against its neighbours even where the border colour is not
+   perceivable. */
+.manage-row.confirming,
+.manage-group.confirming { background: var(--err-tint); }
+.manage-row.confirming:hover { background: var(--err-tint); }
+.manage-row.confirming .manage-panel,
+.manage-group.confirming .manage-panel {
+  border-left-color: var(--err);
+  background: transparent;
+}
+
+.manage-warn-title {
+  font-family: var(--font-sans);
+  font-size: var(--fs-h4);
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  color: var(--err);
+}
+.manage-warn-text {
+  font-size: var(--fs-label);
+  line-height: var(--lh-body);
+  color: var(--ink-2);
+  overflow-wrap: anywhere;
+}
+
+/* ══ EDIT ══
+   --navy rather than a third colour: editing is the ordinary state
+   of this page, not a warning. */
+.manage-row.editing .manage-panel { border-left-color: var(--navy); }
+
+/* The three fields sit side by side at full width — the row is wide,
+   and the edit form is the one place on the page that can spend it —
+   and fall to one column on their own below ~24ch each, so the
+   stacked layout needs no rule of its own. */
+.manage-edit-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(24ch, 1fr));
+  gap: var(--sp-3);
+  align-items: start;
+}
+
+.manage-field { min-width: 0; }
+
+/* FolderPicker carries its own <label for>, so this wrapper adds
+   spacing only — a second label at the call site would leave the
+   select with two names and the first one pointing nowhere. */
+.manage-field-picker > * { display: block; }
+
+/* ══════════════════════════════════════════════════════════════
+   RESPONSIVE
+   ══════════════════════════════════════════════════════════════ */
+
+/* TOUCH FLOOR — the same 959px edge the shell uses to drop to one
+   pane, which is where this page is most likely being used with a
+   thumb. Every control on it clears 44px there; the 28px .btn-icon
+   and the 22px .btn-sm are pointer sizes, not finger sizes. */
+@media (max-width: 959px) {
+  .manage-doc .btn { min-height: var(--manage-touch); }
+  /* 44 in both directions, not just in height — "edit" is four
+     characters wide at --fs-micro. The ghost also gets its rule
+     outright here: its affordance is a border that appears on hover,
+     and a touch screen has no hover, so without this the two row
+     actions are a pair of bare words. */
+  .manage-acts .btn {
+    min-width: var(--manage-touch);
+    border-color: var(--rule-strong);
+  }
+  .manage-bar-sort .seg-control button {
+    min-height: var(--manage-touch);
+    padding: var(--sp-2) var(--sp-3);
+  }
+  .manage-filter-input { padding-right: var(--manage-touch); }
+  .manage-filter-clear { width: var(--manage-touch); }
+  .manage-inline-add {
+    display: inline-flex;
+    align-items: center;
+    min-height: var(--manage-touch);
+  }
+  /* the buttons got taller, so the feed rows give back some of their
+     own padding rather than growing to 64px each. Scoped to .manage-row
+     on purpose: the folder heads keep their air, because that space is
+     the only thing separating one group from the last. */
+  .manage-row th,
+  .manage-row td { padding-top: var(--sp-1); padding-bottom: var(--sp-1); }
+}
+
+/* STACKED — below this a four-column table cannot hold four columns:
+   at 360px the url column would be nine characters wide. Each row
+   becomes a block instead, title over url over folder over actions,
+   with the column name printed beside the folder because the table
+   head that named it is gone. The roles in the markup are what keep
+   this a table to a screen reader once `display` stops saying so. */
+@media (max-width: 640px) {
+  .manage-doc { padding: var(--sp-4) var(--sp-3) var(--sp-5); }
+
+  .manage-table,
+  .manage-table tbody,
+  .manage-table tr,
+  .manage-table th,
+  .manage-table td { display: block; width: auto; }
+
+  .manage-table thead { display: none; }
+
+  .manage-table tbody tr { padding: var(--sp-3) 0; }
+  .manage-table th,
+  .manage-table td { padding: 0; }
+
+  .manage-row .mt-url,
+  .manage-row .mt-folder { margin-top: var(--sp-1); }
+
+  .mt-folder {
+    display: flex;
+    align-items: baseline;
+    gap: var(--sp-2);
+  }
+  .mt-label { display: inline-block; }
+
+  /* the actions become their own line under the record. left-aligned
+     at their natural width rather than stretched across the row: a
+     ghost button has no fill, so a full-width one reads as a stray
+     centred word rather than as a control. */
+  .mt-act { text-align: left; }
+  .manage-acts {
+    justify-content: flex-start;
+    gap: var(--sp-2);
+    margin-top: var(--sp-2);
+  }
+
+  .manage-group > td { padding-top: var(--sp-4); padding-bottom: var(--sp-1); }
+  .manage-group-remove { margin-left: 0; }
+
+  .manage-panel { padding: var(--sp-2); }
+  .manage-panel-acts .btn { flex: 1 1 auto; }
+
+  /* the toolbar stops being a row: two 44px controls and two buttons
+     do not fit beside each other at 360px */
+  .manage-bar-filter { flex-basis: 100%; max-width: none; }
+  .manage-bar-actions { margin-left: 0; }
+  .manage-bar-actions .btn { flex: 1 1 auto; }
+}
+
+/* ══ OOB READER RESET ══
+   The manage response ships an out-of-band empty <section id="reader">
+   to clear whatever article was open. It used to do that with an
+   inline style="display:none", which is both a hard-coded style in
+   markup and unreachable from a media query — so the shell could
+   never choose to show that pane again at another breakpoint. */
+.manage-reader-off { display: none; }

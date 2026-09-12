@@ -1,0 +1,664 @@
+/* ──────────────────────────────────────────────────────────────
+   SHELL — the application frame
+   The grid, the topbar, and the three responsive modes. Nothing in
+   here knows what a feed or an article is; everything in here is
+   about where the panes sit and how they get out of each other's way.
+
+   Z-INDEX LADDER (local to the shell; base.css owns 300+)
+     45  reader, when it slides over the list below 960px
+     55  drawer scrim
+     60  sidebar, when it is an overlay drawer
+     70  topbar — above both, so the toggle that opened the drawer
+         is still the control that closes it
+
+   BREAKPOINTS — these are copied verbatim from app.js, which holds
+     mqOnePane = matchMedia('(max-width: 959px)')
+     mqDrawer  = matchMedia('(max-width: 1279px)')
+   and hard-returns from showPane() when mqOnePane does not match. If
+   CSS used the conventional `959.98px` and JS used `959px`, then at a
+   fractional viewport width (browser zoom, devicePixelRatio rounding)
+   the shell would render the reader as an off-screen overlay while
+   showPane() refused to set [data-pane] — i.e. tapping a row would do
+   nothing at all. Identical query strings are the only way to
+   guarantee the two agree, so `.98` is NOT used anywhere in this file.
+   The 1px gaps this leaves (959→960, 1279→1280) both fall back to a
+   working wider layout, which is the safe direction to fail in.
+   ────────────────────────────────────────────────────────────── */
+
+/* ══════════════════════════════════════════════════════════════
+   THE GRID
+   Three columns from tokens rather than three hard-coded pixel
+   values, so the sidebar width the grid uses and the width the
+   drawer uses can never drift apart.
+
+   100dvh, not 100vh: on mobile Safari and Chrome `vh` is the height
+   the viewport has when the browser chrome is *retracted*, so a
+   100vh app is permanently taller than the screen and the status
+   bar sits under the URL bar. dvh tracks the live value.
+   ══════════════════════════════════════════════════════════════ */
+.app {
+  /* ── LOCAL CUSTOM PROPERTIES ──────────────────────────────────
+     tokens.css is owned elsewhere, so the four values the mobile
+     layout needs are defined here, on the frame that owns them.
+     Every one of them resolves to 0px (or to an existing token) on a
+     desktop browser, so nothing above 960px moves because of them.
+
+     --safe-*      the notch/home-indicator insets. These stay 0 until
+                   layout.templ's viewport meta gains `viewport-fit=cover`
+                   — see the report. Writing them now means the day that
+                   one word is added, the whole app is already correct.
+     --topbar-total / --status-total
+                   the real height of the fixed chrome, i.e. the token
+                   plus whatever the device steals. The grid rows, the
+                   drawer, the scrim and the reader overlay all have to
+                   agree on these, and they are computed once here
+                   rather than re-derived in four places.
+     --touch       44px, the smallest comfortable finger target. Used
+                   only inside the sub-960px blocks.
+     --pane-l/-r   the pane inset, safe-area aware. Panes that run to
+                   the viewport edge use these instead of --pane-x so
+                   a landscape notch never sits on top of a title. */
+  --safe-t: env(safe-area-inset-top, 0px);
+  --safe-r: env(safe-area-inset-right, 0px);
+  --safe-b: env(safe-area-inset-bottom, 0px);
+  --safe-l: env(safe-area-inset-left, 0px);
+  --topbar-total: calc(var(--topbar-h) + var(--safe-t));
+  --status-total: calc(var(--status-h) + var(--safe-b));
+  --touch: 44px;
+  --pane-l: calc(var(--pane-x) + var(--safe-l));
+  --pane-r: calc(var(--pane-x) + var(--safe-r));
+
+  display: grid;
+  grid-template-columns: var(--rail-w) var(--list-w) minmax(0, 1fr);
+  grid-template-rows: var(--topbar-total) minmax(0, 1fr) var(--status-total);
+  grid-template-areas:
+    "topbar  topbar topbar"
+    "sidebar list   reader"
+    "status  status status";
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+  /* The drawer and the reader overlay are positioned against THIS box
+     rather than against the viewport. position:fixed resolves against
+     the initial containing block, which on mobile Safari is the LARGE
+     viewport (chrome retracted) — so a fixed `bottom: var(--status-h)`
+     lands underneath the URL bar while the grid's own status row,
+     living inside 100dvh, sits correctly above it. Anchoring both
+     overlays to .app is what makes the two agree at every scroll
+     position, and it also means overflow:hidden below clips the
+     off-screen reader instead of letting it widen the page. */
+  position: relative;
+  /* iOS inflates text in landscape unless this is pinned, which would
+     silently break every fixed-height row and bar in the app */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  /* the default tap flash is a black wash; this is the same feedback
+     in the app's own ink */
+  -webkit-tap-highlight-color: var(--tint-2);
+  transition: grid-template-columns var(--dur) var(--ease);
+}
+
+/* a grid item's automatic minimum size is its content, so one long
+   unbroken url in the list used to push the reader off screen */
+.app > * { min-width: 0; min-height: 0; }
+
+/* Pane placement lives with the grid that defines the areas, not in
+   each pane's own file — otherwise changing the frame means editing
+   five files. The panes style their own insides. */
+.topbar { grid-area: topbar; }
+.app > .sidebar { grid-area: sidebar; }
+.app > .list    { grid-area: list; }
+.app > .reader  { grid-area: reader; }
+.app > .status  { grid-area: status; }
+
+/* settings and manage are full-width documents, not a list beside a
+   reader, so they take both content columns */
+.app > .settings-page,
+.app > .manage-page {
+  grid-row: list-start / list-end;
+  grid-column: list-start / reader-end;
+}
+
+/* ══ COLLAPSE (three-pane only) ══
+   `1` and `2` animate a column track to zero rather than toggling
+   display, so the remaining panes glide instead of snapping. The
+   collapsed pane is also made `visibility: hidden`: a 0px-wide pane
+   still holds every one of its links in the tab order otherwise. */
+@media (min-width: 1280px) {
+  .app.sidebar-collapsed                { grid-template-columns: 0px var(--list-w) minmax(0, 1fr); }
+  .app.list-collapsed                   { grid-template-columns: var(--rail-w) 0px minmax(0, 1fr); }
+  .app.sidebar-collapsed.list-collapsed { grid-template-columns: 0px 0px minmax(0, 1fr); }
+
+  .app.sidebar-collapsed > .sidebar,
+  .app.list-collapsed > .list {
+    overflow: hidden;
+    visibility: hidden;
+    border-right-width: 0;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   TOPBAR
+   Left lockup, centred search, right-hand actions. The old bar put
+   three add-buttons and a permanently pulsing "sync · now" in the
+   chrome; "+ folder" now lives in the sidebar and on the manage
+   page, which is where folders are actually worked with.
+   ══════════════════════════════════════════════════════════════ */
+.topbar {
+  position: relative;
+  z-index: 70;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  /* the bar is --topbar-h of chrome PLUS whatever the status bar of
+     the phone covers; the padding keeps the controls out from under
+     the notch while the plate still bleeds to the top edge */
+  height: var(--topbar-total);
+  padding: var(--safe-t) var(--pane-r) 0 var(--pane-l);
+  background: var(--paper-sub);
+  border-bottom: 1px solid var(--rule);
+}
+
+.tb-left,
+.tb-right {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  min-width: 0;
+}
+.tb-left  { gap: var(--sp-2); }
+.tb-right { gap: var(--sp-1); }
+
+/* shown only where the sidebar has become a drawer */
+.tb-drawer { display: none; }
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: var(--fs-nav);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+  white-space: nowrap;
+}
+.brand-logo {
+  height: 18px;
+  width: auto;
+  flex: 0 0 auto;
+}
+.brand-name { overflow: hidden; text-overflow: ellipsis; }
+
+/* ══ SEARCH ══
+   Given a real box rather than a bare input floating in the bar, so
+   it reads as a field before it is clicked. The focus ring is moved
+   onto the wrapper because the input has no border of its own. */
+.tb-search {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 52ch;
+  margin-inline: auto;
+  height: calc(var(--topbar-h) - var(--sp-4));
+  padding: 0 var(--sp-2);
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  transition: border-color var(--dur-fast) ease, background-color var(--dur-fast) ease;
+}
+.tb-search:focus-within {
+  border-color: var(--navy);
+  background: var(--paper-2);
+}
+.tb-search:has(:focus-visible) {
+  outline: 2px solid var(--navy);
+  outline-offset: 2px;
+}
+.tb-search-icon { flex: 0 0 auto; color: var(--ink-4); }
+
+.tb-search-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  background: transparent;
+  border: 0;
+  outline: none;
+  font-family: var(--font-mono);
+  font-size: var(--fs-label);
+  letter-spacing: 0.02em;
+  color: var(--ink);
+}
+.tb-search-input::placeholder { color: var(--ink-4); }
+/* the native cancel button is a second, differently-styled clear
+   control sitting next to ours */
+.tb-search-input::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
+
+/* :placeholder-shown reads the live value, so the clear button and
+   the `/` hint swap without javascript — and `display: none` keeps
+   the clear button out of the tab order while there is nothing to
+   clear, which `opacity: 0` would not. */
+.tb-search-clear {
+  flex: 0 0 auto;
+  width: var(--sp-4);
+  height: var(--sp-4);
+}
+.tb-search-kbd { flex: 0 0 auto; }
+.tb-search-input:placeholder-shown ~ .tb-search-clear { display: none; }
+.tb-search-input:not(:placeholder-shown) ~ .tb-search-kbd { display: none; }
+
+/* ══ SYNC ══
+   The dot used to pulse forever, which trained the eye to ignore it.
+   It is now a steady mark that animates only while a request is in
+   flight — htmx puts .htmx-request on this button because its
+   hx-indicator names it alongside #progress-bar (htmx's bare
+   `this` keyword is only honoured when it is the whole value). */
+.sync-dot {
+  flex: 0 0 auto;
+  width: var(--sp-1);
+  height: var(--sp-1);
+  background: var(--live);
+}
+.tb-sync.htmx-request .sync-dot { animation: sync-pulse 0.9s var(--ease) infinite; }
+@keyframes sync-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: 0.2; transform: scale(0.6); }
+}
+
+/* ══ THEME TOGGLE ══
+   Both states are in the markup and CSS shows the one you would be
+   switching *to*. Each icon carries its own visually-hidden label,
+   and because the hidden half is `display: none` it leaves the
+   accessibility tree too — so the button's accessible name is always
+   the action it will perform, with no javascript keeping it in sync. */
+.tb-theme-light,
+.tb-theme-dark { display: inline-flex; align-items: center; }
+.tb-theme-dark { display: none; }
+[data-theme="dark"] .tb-theme-light { display: none; }
+[data-theme="dark"] .tb-theme-dark  { display: inline-flex; }
+
+/* ══ DRAWER SCRIM ══
+   Declared BEFORE the media queries that switch it on, not after.
+   A media query adds no specificity, so `.drawer-scrim { display:
+   block }` inside @media and `.drawer-scrim { display: none }` at top
+   level are a straight source-order contest — and with this block
+   sitting below the query, `none` won at every width. The scrim has
+   therefore never painted, and because display:none also takes an
+   element out of hit-testing, its data-action="close-drawer" never
+   fired either: below 1280px the drawer had no dimming and no
+   tap-outside-to-dismiss, which on a phone is the only way most
+   people close a drawer at all.
+
+   The scrim starts below the topbar rather than over it, so the
+   button that opened the drawer is still the button that closes it.
+   Its colour is the *opposite* plate's ink in each theme — --navy in
+   light and --cream in dark are both the dark value — because a
+   scrim has to darken what is behind it in both themes. */
+.drawer-scrim {
+  display: none;
+  /* absolute against .app for the same reason the drawer is: a fixed
+     scrim ends at the large-viewport bottom, which leaves a live strip
+     of un-dismissable list showing under the URL bar on iOS */
+  position: absolute;
+  grid-area: auto;
+  top: var(--topbar-total);
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 55;
+  background: var(--navy);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--dur) var(--ease);
+}
+[data-theme="dark"] .drawer-scrim { background: var(--cream); }
+.app.drawer-open .drawer-scrim {
+  opacity: 0.42;
+  pointer-events: auto;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   960–1279px — TWO PANES
+   The rail is the first thing to go: at this width the list and the
+   reader together are the app, and a permanently open 264px of
+   navigation costs more than it returns. It becomes a drawer over a
+   scrim, opened from the topbar.
+   ══════════════════════════════════════════════════════════════ */
+@media (max-width: 1279px) {
+  .app {
+    grid-template-columns: var(--list-w) minmax(0, 1fr);
+    grid-template-areas:
+      "topbar topbar"
+      "list   reader"
+      "status status";
+  }
+  /* the collapse classes describe a three-pane layout; they must not
+     zero a track that no longer exists here */
+  .app.sidebar-collapsed,
+  .app.list-collapsed,
+  .app.sidebar-collapsed.list-collapsed {
+    grid-template-columns: var(--list-w) minmax(0, 1fr);
+  }
+
+  .tb-drawer { display: inline-flex; }
+
+  .app > .sidebar {
+    /* absolute against .app, not fixed against the viewport — see the
+       note on .app. grid-area has to be reset to auto or the grid
+       spec makes the (now non-existent) `sidebar` area the containing
+       block instead of the app's padding box. */
+    position: absolute;
+    grid-area: auto;
+    top: var(--topbar-total);
+    bottom: 0;
+    left: 0;
+    z-index: 60;
+    width: min(var(--rail-w), 84vw);
+    /* a landscape notch is on the left or right edge, and this drawer
+       is flush to the left one; the bottom inset keeps "settings" —
+       the last row in the rail — clear of the home indicator. The
+       padding is on the aside so .rail's height:100% resolves against
+       the reduced content box and its scrollport shortens with it. */
+    padding-left: var(--safe-l);
+    padding-bottom: var(--safe-b);
+    /* an overlay must be opaque over whatever it covers */
+    background: var(--paper-sub);
+    border-right: 1px solid var(--rule-strong);
+    box-shadow: var(--shadow-panel);
+    transform: translateX(-100%);
+    /* visibility, not just transform: a translated-off drawer is
+       still focusable, so tabbing walked into an invisible sidebar */
+    visibility: hidden;
+    transition: transform var(--dur) var(--ease), visibility var(--dur) step-end;
+  }
+  .app.drawer-open > .sidebar {
+    transform: none;
+    visibility: visible;
+    transition: transform var(--dur) var(--ease), visibility 0s;
+  }
+
+  .drawer-scrim { display: block; }
+}
+
+
+/* ══════════════════════════════════════════════════════════════
+   <960px — ONE PANE
+   Two 380px panes do not fit in 600px, so below this the app shows
+   one at a time and [data-pane] on .app says which. The reader is
+   the overlay rather than the list because opening an article is a
+   push and closing it is a pop — the list keeps its scroll position
+   underneath instead of being torn down and rebuilt.
+   ══════════════════════════════════════════════════════════════ */
+@media (max-width: 959px) {
+  .app {
+    /* 52px of chrome cannot hold a 44px control with any breathing
+       room. --sp-6 is 56px, which fits 44 + --sp-1 above and below
+       exactly, so the phone topbar comes out of the space ladder
+       rather than out of a new magic number. */
+    --topbar-h: var(--sp-6);
+    /* 28px is not a touch target, and the bar's one control — the `?`
+       that reaches the shortcut table — was simply deleted below
+       760px rather than sized. status.css re-earns it at --touch.
+       Declared here, not there: shell.css loads first, so the
+       landscape rule below can still zero this row. */
+    --status-h: var(--touch);
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "topbar"
+      "list"
+      "status";
+  }
+  .app.sidebar-collapsed,
+  .app.list-collapsed,
+  .app.sidebar-collapsed.list-collapsed {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  /* there is no reader column to span any more */
+  .app > .settings-page,
+  .app > .manage-page { grid-area: list; }
+
+  /* ── THE PUSH ──
+     The reader slides in from the right over a list that is never torn
+     down, so going back is a pop: .list keeps its scrollTop, its
+     keyboard selection and its DOM. (This is why the overlay is the
+     reader and not the list — an htmx swap of #main would lose all
+     three.) `absolute`, not `fixed`: bottom: var(--status-total) has
+     to mean "above the status row of THIS 100dvh grid", which the
+     viewport-relative containing block of a fixed box does not.
+     grid-area: auto is required for that containing block to be the
+     app's padding box rather than the named area. */
+  .app > .reader {
+    position: absolute;
+    grid-area: auto;
+    top: var(--topbar-total);
+    right: 0;
+    bottom: var(--status-total);
+    left: 0;
+    /* reader.css sets `height: 100%` for the pane's life as a grid
+       column. An out-of-flow box with top, bottom AND height all set
+       is over-constrained, and the rule is that `bottom` loses — so
+       the overlay was 100% of the viewport starting 52px down, i.e.
+       80px taller than the space it had, painting its last 80px (and
+       its scrollport's bottom edge) underneath the status bar and off
+       the screen. `.app > .reader` out-specifies `.reader`, so this
+       is the one place that can put it back without touching the
+       desktop rule. */
+    height: auto;
+    z-index: 45;
+    background: var(--paper);
+    transform: translateX(100%);
+    visibility: hidden;
+    transition: transform var(--dur) var(--ease), visibility var(--dur) step-end;
+  }
+  .app[data-pane="reader"] > .reader {
+    transform: none;
+    visibility: visible;
+    transition: transform var(--dur) var(--ease), visibility 0s;
+  }
+
+  /* The list is covered but still in the document, so without this a
+     tab from the reader's back button walked into forty invisible
+     rows. visibility (not display) preserves the scroll offset that
+     the whole push/pop model exists to keep, and step-end holds it
+     visible for the length of the slide so the strip of screen the
+     incoming reader has not reached yet is still the list. Reduced
+     motion zeroes --dur globally in base.css, which turns this into
+     an instant swap — correct, and nothing here depends on the
+     animation to be understood: .reader-back is always on screen. */
+  .app > .list {
+    visibility: visible;
+    transition: visibility 0s;
+  }
+  .app[data-pane="reader"] > .list {
+    visibility: hidden;
+    transition: visibility var(--dur) step-end;
+  }
+
+  /* ── TOUCH TARGETS ──
+     Every chrome control is ≥44px on its smallest dimension. The 28px
+     .btn-icon is a pointer size; even the 32px this used to use is
+     below the threshold at which a thumb stops missing. min-width
+     matters as much as min-height: below 700px the sync and new
+     buttons lose their labels and collapse to ~18px wide otherwise. */
+  .topbar { gap: var(--sp-2); padding: var(--safe-t) calc(var(--sp-2) + var(--safe-r)) 0 calc(var(--sp-2) + var(--safe-l)); }
+  .topbar .btn { min-height: var(--touch); min-width: var(--touch); }
+  .topbar .btn-icon { width: var(--touch); height: var(--touch); }
+  /* the brand is an <a href="/"> — an 18px logo is not a target */
+  .brand { min-height: var(--touch); }
+  /* ...except the one that lives inside the search box, which takes
+     the box's own height */
+  .topbar .tb-search-clear { width: var(--touch); height: 100%; }
+  .tb-search { height: calc(var(--topbar-h) - var(--sp-1) * 2); }
+  /* iOS Safari zooms the entire page when a field smaller than 16px
+     takes focus — which on a layout this fixed leaves the app
+     scrolled sideways with no way back. --fs-prose is 16.5px. */
+  .tb-search-input { font-size: var(--fs-prose); }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   NARROW CHROME — THE COLLAPSE ORDER
+
+   At 360px the bar has to hold: drawer toggle, brand lockup, search,
+   sync, theme, new. As six 44px targets plus a wordmark that is 17
+   mono characters wide, that is about 420px of content in 340px of
+   room. Things come off in order of how much they cost versus what
+   they return, and nothing is ever removed outright — every function
+   stays reachable and every accessible name stays intact, because
+   what is dropped is always the *visible text*, never the element:
+   layout.templ already carries a .visually-hidden label on each
+   control, and base.css's .visually-hidden keeps it in the a11y tree.
+
+     ≤860  the wordmark. The logo still identifies the app and the
+           anchor's accessible name is unchanged. Saves ~143px.
+     ≤700  the button labels on sync and new. The glyphs carry the
+           meaning, the labels are announced. Saves ~100px, and the
+           search loses its 52ch cap so it takes the slack.
+     ≤479  the search collapses to its own icon. At this width a
+           field would be ~104px — too narrow to show its placeholder
+           or a typed query — so it becomes a 44px control that opens
+           to the full width of the bar on focus. Saves ~60px AND
+           gives the expanded field four times the room it would
+           otherwise have had.
+
+   Nothing after that: the remaining five controls are the app.
+   ══════════════════════════════════════════════════════════════ */
+@media (max-width: 860px) {
+  .brand-name { display: none; }
+}
+@media (max-width: 700px) {
+  .tb-label { display: none; }
+  .tb-sync,
+  .tb-new { padding: var(--sp-1); }
+  .tb-search { max-width: none; }
+  /* with its label gone the sync button is a 6px dot alone in a 44px
+     box, which reads as a stray speck rather than a control. The other
+     buttons here are all 14px glyphs; the mark is sized to match them
+     so the group reads as one row of controls. */
+  .tb-sync .sync-dot { width: var(--sp-2); height: var(--sp-2); }
+}
+
+/* ══ SEARCH AS A CONTROL ══
+   Collapsed, the box is 44×44: the magnifier is painted on top with
+   pointer-events:none and the input is stretched underneath it, so a
+   tap anywhere in the square lands on the input and :focus-within
+   does the expanding. No javascript, no markup change, no extra tab
+   stop — the input is the same single tab stop it always was.
+
+   Expanded, it is positioned against .topbar (which is already
+   position:relative) and spans the bar, covering the controls rather
+   than squeezing them. It is opaque for that reason.
+
+   `opacity: 0` rather than `display: none` on the collapsed input:
+   the element has to keep its box to be the hit target, and it has to
+   stay in the accessibility tree to keep its <label>. */
+@media (max-width: 479px) {
+  .tb-search {
+    position: relative;
+    flex: 0 0 auto;
+    width: var(--touch);
+    padding: 0;
+  }
+  .tb-search-icon {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+  }
+  .tb-search-input {
+    width: 100%;
+    height: 100%;
+    padding: 0;
+    opacity: 0;
+  }
+  /* there is no `/` key on a phone, and the clear button cannot sit
+     inside a 44px square that is entirely the input's hit area */
+  .tb-search-kbd,
+  .tb-search:not(:focus-within) .tb-search-clear { display: none; }
+
+  /* An active query is filtering the list from behind a closed
+     control, which would otherwise look like "my feeds are empty".
+     The collapsed icon carries the state — and carries it as a border
+     as well as a colour, so it survives greyscale. */
+  .tb-search:has(.tb-search-input:not(:placeholder-shown)) { border-color: var(--navy); }
+  .tb-search:has(.tb-search-input:not(:placeholder-shown)) .tb-search-icon { color: var(--navy); }
+
+  .tb-search:focus-within {
+    position: absolute;
+    left: calc(var(--sp-2) + var(--safe-l));
+    right: calc(var(--sp-2) + var(--safe-r));
+    top: calc(var(--safe-t) + var(--sp-1));
+    width: auto;
+    height: calc(var(--topbar-h) - var(--sp-1) * 2);
+    z-index: 2;
+    padding: 0 var(--sp-2);
+    background: var(--paper-2);
+  }
+  .tb-search:focus-within .tb-search-icon {
+    position: static;
+    transform: none;
+  }
+  .tb-search:focus-within .tb-search-input { opacity: 1; }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   SHORT VIEWPORTS — LANDSCAPE PHONES
+   ~700×360 is the awkward one: wide enough that the width queries
+   above leave it looking like a small tablet, and short enough that
+   56 + 28 = 84px of fixed chrome is a quarter of the screen — which
+   on a list of 44px rows is the difference between six visible items
+   and four.
+
+   Two things give way, in this order:
+     · the topbar drops to exactly --touch, so it is the height of one
+       control and not a control plus padding. Targets do NOT shrink;
+       this is the orientation people hold the phone in with one hand.
+     · the status bar goes entirely. Everything still on it at this
+       width is an unread count and a sync dot, both of which are also
+       in the rail; nothing on it is interactive once .st-help is the
+       only control and the drawer already reaches settings.
+
+   With the status row gone the list and the reader run to the bottom
+   edge, so --status-h becomes the home-indicator inset instead of a
+   bar height and the two panes pick that up through --status-total.
+   ══════════════════════════════════════════════════════════════ */
+@media (max-height: 480px) and (orientation: landscape) {
+  .app {
+    --topbar-h: var(--touch);
+    --status-h: 0px;
+    /* The status row was the thing holding the panes clear of the home
+       indicator. With it gone the grid has to do that itself: padding
+       on a border-box 100dvh shortens the content area, so the list
+       and the reader both stop above the indicator. The absolutely
+       positioned overlays resolve against the PADDING box, so their
+       `bottom: var(--status-total)` — now exactly --safe-b — lands on
+       the same line. One inset, two layout modes, no double count. */
+    padding-bottom: var(--safe-b);
+  }
+  /* `.app > .status`, not `.status`: status.css is loaded after this
+     file and opens with `.status { display: flex }`, which at equal
+     specificity wins on source order. The descendant combinator buys
+     the one point of specificity that makes the frame's decision
+     stick without an !important. */
+  .app > .status { display: none; }
+  /* the field would be 32px tall inside a 44px bar otherwise */
+  .tb-search { height: calc(var(--topbar-h) - 4px); }
+}
+
+/* The bar is now exactly one control tall, so the controls take the
+   bar's height instead of their own — 43px once the hairline is
+   subtracted. That is the single place in the app where a target is
+   under 44px, and it is the price of a 360px-tall screen. Scoped to
+   phone widths so a short *desktop* window keeps its 28px chrome. */
+@media (max-width: 959px) and (max-height: 480px) and (orientation: landscape) {
+  .topbar .btn,
+  .topbar .btn-icon {
+    height: calc(var(--topbar-h) - 1px);
+    min-height: 0;
+  }
+}
+
+@media print {
+  .drawer-scrim { display: none !important; }
+}

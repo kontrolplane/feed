@@ -1,0 +1,467 @@
+/* ──────────────────────────────────────────────────────────────
+   SETTINGS
+   This page was the worst inline-style offender in the codebase:
+   three headings each carrying a seven-property `style=`, and the
+   keyboard grid and import row expressed entirely inline. All of it
+   is here now, so there is one place to change how settings look.
+
+   The bigger fix is structural. Four of the five "settings cards"
+   were `.s-cell.disabled` blocks rendering segmented controls with
+   a highlighted current value and *no click handler of any kind* —
+   mark-read-on, refresh cadence, retention and density. There are no
+   routes to change them; they are environment variables read once at
+   boot (see internal/configuration). A control that looks pressable,
+   shows a selected state, and silently does nothing is a UI that
+   lies about what the software can do, and it costs a self-hoster
+   real time before they work out the value lives in their compose
+   file. So they are no longer controls: they are a definition list
+   of current value + the env var that sets it. Read-only state that
+   tells you exactly what to edit beats a fake button.
+
+   What *is* live — theme and, now that tokens.css drives --row-y off
+   [data-density], density — is promoted into its own section at the
+   top, as real .seg-controls with aria-pressed. The line between
+   "you can change this here" and "you change this in your
+   environment" is now the page's primary structure.
+
+   ══ THE WIDTH DECISION ══
+   shell.css hands this page BOTH content columns — everything right
+   of the rail, so ~1340px on a 1600px screen. It used to render into
+   that at `--measure + 12ch` (~620px): a narrow document pinned in
+   a very large empty pane, which is what "the usage of space on the
+   system pages is not correct" is describing.
+
+   Three options were on the table.
+
+   1. Widen the single column to fill the pane. Rejected: a
+      label/value row 1300px wide has the eye travelling the width of
+      the screen to associate two words, and the section notes become
+      160-character lines. Width alone does not make a page.
+   2. Two-column masonry over the five sections. Rejected: the
+      sections are numbered 01–05 and are read as a sequence the
+      first time someone opens this page. Their heights differ by 4x
+      (appearance is two controls, keyboard is ten rows), so a
+      two-column flow either ragged-ends or reorders them, and in
+      both cases "which column do I read next" is a question the
+      reader should never have to ask about their own settings.
+   3. What is built here: ONE column of sections at a deliberate
+      page width, and spend the width *inside* each section, where
+      the content is genuinely tabular.
+
+   So the doc is capped at two reading measures plus a gutter —
+   `calc(var(--measure) * 2 + var(--sp-6))`, ~1115px at the mono
+   13px body size — and centred. That is a page, not a strip: at
+   1440px it very nearly fills the pane, and at 1920px it is a
+   centred document with honest margins rather than a left-aligned
+   column with a dead half-screen beside it.
+
+   Line length is then protected one level down, not by the
+   container:
+     · the env-var <dl> flows into auto-fit columns of >=38ch, so a
+       description wraps at ~45ch, not at 140ch;
+     · the build <dl> becomes a spec strip of >=22ch cells — five
+       short facts should be a row, not five rows;
+     · the keyboard reference is two tables of five rows side by
+       side, halving its height and keeping each action string near
+       40ch;
+     · .s-section-note and .pane-lead keep their own ch caps.
+   Every multi-column block is `repeat(auto-fit, minmax(Nch, 1fr))`,
+   so the collapse to a single column at 360px falls out of the same
+   declaration instead of needing a breakpoint to undo it.
+   ────────────────────────────────────────────────────────────── */
+
+/* The settings page replaces the list *and* the reader, so it is the
+   only full-width pane in the app. It gets its own scrollport rather
+   than letting the shell scroll, so the header stays put when the
+   page is swapped in over a scrolled list.
+
+   No grid-area / position here: shell.css owns pane placement. */
+.settings-page {
+  /* the page measure, derived rather than picked: two reader columns
+     and the gutter that would sit between them */
+  --s-doc-w: calc(var(--measure) * 2 + var(--sp-6));
+  /* WCAG 2.5.8 target size. Not in tokens.css because no other pane
+     needs a floor — this one has the app's only run of small
+     segmented buttons that a thumb has to land on. */
+  --s-touch: 44px;
+
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--paper);
+}
+
+.settings-scroll {
+  flex: 1;
+  min-height: 0;
+}
+
+.settings-doc {
+  max-width: var(--s-doc-w);
+  margin: 0 auto;
+  padding: var(--sp-6) var(--pane-x);
+}
+
+/* ══ HEADER ══ */
+.settings-head {
+  padding-bottom: var(--sp-4);
+  border-bottom: 1px solid var(--rule-strong);
+}
+.settings-head .pane-title { margin: var(--sp-2) 0 var(--sp-3); }
+
+/* ══ SECTIONS ══
+   One head treatment for all five: eyebrow, sans heading, hairline.
+   Previously each <h2> carried its own inline font-family/size/
+   letter-spacing, so they were three chances to drift apart. */
+.s-section { margin-top: var(--sp-6); }
+
+.s-section-head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  padding-bottom: var(--sp-2);
+  border-bottom: 1px solid var(--rule);
+}
+
+.s-section-title {
+  font-family: var(--font-sans);
+  font-size: var(--fs-h2);
+  font-weight: 600;
+  line-height: var(--lh-heading);
+  letter-spacing: -0.02em;
+  color: var(--ink);
+}
+
+/* The one line that says whether this section is something you can
+   act on. It is load-bearing, not decoration — it is what stops a
+   reader clicking at the read-only rows. Capped at 62ch: the
+   container got wider, this sentence did not. */
+.s-section-note {
+  margin-top: var(--sp-2);
+  font-size: var(--fs-label);
+  line-height: var(--lh-body);
+  color: var(--ink-3);
+  max-width: 62ch;
+}
+
+/* ══ APPEARANCE — the live controls ══
+   Label above the control rather than beside it, so the two rows
+   stack cleanly at any width without a media query. The label is a
+   <span> with an id referenced by the group's aria-labelledby: a
+   <label> would be wrong markup for a group of buttons.
+
+   A grid rather than a flex row so the two groups start on the same
+   two columns instead of being packed left at whatever width their
+   button count happens to give them. */
+.s-controls {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(30ch, max-content));
+  gap: var(--sp-3) var(--sp-5);
+  align-items: start;
+  margin-top: var(--sp-3);
+}
+
+.s-control {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+
+.s-control-label {
+  font-family: var(--font-mono);
+  font-size: var(--fs-nano);
+  letter-spacing: 0.1em;
+  color: var(--ink-3);
+}
+
+/* ══ READ-ONLY STATE ══
+   term on the left, value / env var / explanation on the right. The
+   env var is the actionable half — it is set in the ink at full
+   strength and boxed, because "MARK_READ_ON" is the string the
+   reader is going to paste into their compose file.
+
+   These are five independent facts, not a sequence, so they read
+   equally well down two columns as down one — and two columns is
+   what keeps the descriptions near 45ch inside a 1100px page while
+   removing half the scroll. auto-fit does the collapse itself: below
+   ~80ch of content box there is only ever one column. */
+.s-defs {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(38ch, 1fr));
+  column-gap: var(--sp-5);
+  align-content: start;
+  margin-top: var(--sp-3);
+}
+
+.s-def {
+  display: grid;
+  grid-template-columns: 18ch 1fr;
+  gap: var(--sp-2) var(--sp-4);
+  align-items: baseline;
+  padding: var(--sp-3) 0;
+  border-bottom: 1px solid var(--rule);
+  min-width: 0;
+}
+/* NB: no :last-child border exception. In a two-column grid the last
+   child is not the last row — dropping that one rule would leave the
+   cell beside it carrying a dangling hairline. Every row rules
+   underneath itself and the block closes on one, which is also what
+   makes the two columns scan as two lists rather than one wrapped. */
+
+.s-def-term {
+  font-family: var(--font-mono);
+  font-size: var(--fs-label);
+  letter-spacing: 0.06em;
+  color: var(--ink-3);
+}
+
+.s-def-body {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--sp-1) var(--sp-2);
+  min-width: 0;
+}
+
+.s-def-value {
+  font-family: var(--font-mono);
+  font-size: var(--fs-code);
+  font-weight: 500;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+/* the env var, set apart by a hairline so it reads as a literal you
+   copy rather than as more prose */
+.s-def-env {
+  font-family: var(--font-mono);
+  font-size: var(--fs-nano);
+  letter-spacing: 0.06em;
+  color: var(--ink-2);
+  padding: 2px 6px;
+  border: 1px solid var(--rule-strong);
+  background: var(--tint);
+  white-space: nowrap;
+}
+
+.s-def-note {
+  flex-basis: 100%;
+  font-size: var(--fs-micro);
+  line-height: var(--lh-body);
+  color: var(--ink-4);
+}
+.s-def-note code {
+  font-family: var(--font-mono);
+  font-size: inherit;
+  color: var(--ink-3);
+}
+
+/* The build block has no env vars and no explanations — five short
+   facts of two or three words. As 18ch-term rows they were five
+   near-empty lines; as a strip of narrow stacked cells they are one
+   glance, which is all a version block is ever used for. */
+.s-defs-compact {
+  grid-template-columns: repeat(auto-fit, minmax(22ch, 1fr));
+  column-gap: var(--sp-4);
+}
+.s-defs-compact .s-def {
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--sp-1);
+  padding: var(--sp-2) 0;
+}
+.s-defs-compact .s-def-body { gap: var(--sp-1); }
+
+/* ══ KEYBOARD ══
+   Real <table>s with header rows. This was a two-column CSS grid of
+   bare <div>s, which reads to a screen reader as eighteen unrelated
+   fragments; the key and the thing it does were not associated at
+   all. The visible header is kept — it costs one row and removes the
+   guess about which column is which.
+
+   Split into two tables rather than run as one: a single table
+   across a 1100px page puts "focus search" alone in a 900px cell,
+   and ten rows of that is a lot of scroll for a reference block.
+   Two tables of five sit side by side at ~50ch each, which is the
+   width the longest action string actually wants. They are split on
+   a real seam — what the keys act on — so the grouping carries
+   meaning rather than just being "the first five". Each keeps its
+   own caption and its own <thead>, because a table that is a column
+   in a grid has to be readable on its own once they stack. */
+.s-keys-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(36ch, 1fr));
+  gap: var(--sp-4) var(--sp-5);
+  align-items: start;
+  margin-top: var(--sp-3);
+}
+
+.s-keys {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+}
+
+.s-keys-cap {
+  text-align: left;
+  font-family: var(--font-mono);
+  font-size: var(--fs-nano);
+  letter-spacing: 0.1em;
+  color: var(--ink-4);
+  padding-bottom: var(--sp-1);
+}
+
+.s-keys th,
+.s-keys td {
+  padding: var(--sp-2) var(--sp-3) var(--sp-2) 0;
+  border-bottom: 1px solid var(--rule);
+  vertical-align: baseline;
+}
+
+.s-keys thead th {
+  font-family: var(--font-mono);
+  font-size: var(--fs-nano);
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  color: var(--ink-3);
+  border-bottom-color: var(--rule-strong);
+}
+
+.s-keys tbody th {
+  width: 14ch;
+  font-weight: 400;
+  white-space: nowrap;
+}
+
+.s-keys tbody td {
+  font-size: var(--fs-label);
+  color: var(--ink-2);
+}
+
+.s-keys tbody tr:last-child th,
+.s-keys tbody tr:last-child td { border-bottom: 0; }
+
+/* ══ DATA / OPML ══ */
+.s-data-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin-top: var(--sp-3);
+}
+
+/* The import trigger was a <label> wrapping `<input type="file"
+   style="display:none">`. display:none removes the input from the
+   tab order, and a <label> is not focusable, so importing feeds was
+   reachable by mouse only. The input is now visually hidden but
+   still focusable and still the labelled control; the label draws
+   the focus ring on its behalf via :focus-within. */
+.s-file {
+  position: relative;
+  cursor: pointer;
+}
+.s-file:focus-within {
+  background: var(--paper-2);
+  border-color: var(--navy);
+  color: var(--ink);
+}
+/* the ring is reserved for keyboard focus — clicking the label also
+   focuses the input, and a mouse user should not get an outline for
+   it, so :focus-within paints the surface and :has(:focus-visible)
+   paints the ring */
+.s-file:has(.s-file-input:focus-visible) {
+  outline: 2px solid var(--navy);
+  outline-offset: 2px;
+}
+
+.s-file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+  opacity: 0;
+}
+
+/* The import posted with hx-swap="none" and reported nothing at all —
+   success, a 400 on a malformed file and a 500 were indistinguishable
+   from a no-op. The response now writes here. role="status" +
+   aria-live means a screen reader hears it too; [data-state] carries
+   the colour and the leading glyph carries it again, so the result
+   is never signalled by colour alone. */
+.import-result {
+  margin-top: var(--sp-3);
+  font-size: var(--fs-label);
+  line-height: var(--lh-body);
+  color: var(--ink-3);
+  min-height: 1.55em;
+  max-width: 62ch;
+}
+.import-result:empty { margin-top: 0; }
+.import-result::before {
+  content: '';
+  margin-right: var(--sp-1);
+  font-weight: 500;
+}
+.import-result[data-state="ok"] { color: var(--ok); }
+.import-result[data-state="ok"]::before { content: '✓'; }
+.import-result[data-state="err"] { color: var(--err); }
+.import-result[data-state="err"]::before { content: '✕'; }
+
+/* ══ OOB READER RESET ══
+   The settings response ships an out-of-band empty <section id="reader">
+   to clear the reader pane. It used to do that with an inline
+   style="display:none", which is both a hard-coded style in markup
+   and unreachable from a media query — so the shell could never
+   choose to show that pane again at another breakpoint. */
+.pane-hidden { display: none; }
+
+/* ══ TOUCH ══
+   Below the shell's one-pane breakpoint this page is being driven by
+   a thumb. .seg-control's base padding gives ~26px targets and .btn
+   ~32px, both under the 44px floor; the file <label> has to grow
+   with its button or the import target lies about where it is. */
+@media (max-width: 959.98px) {
+  .s-controls .seg-control button,
+  .s-data-actions .btn {
+    min-height: var(--s-touch);
+    padding-left: var(--sp-3);
+    padding-right: var(--sp-3);
+  }
+}
+
+/* ══ NARROW ══
+   Below 720px the 18ch term column squeezes the value into two or
+   three characters per line, so the definition rows stack. The
+   multi-column grids above need no undoing here — auto-fit has
+   already dropped them to one column by this width. At 360px the
+   content box is ~40ch, which every minmax() floor clears on its
+   own. */
+@media (max-width: 719.98px) {
+  .settings-doc { padding-top: var(--sp-5); }
+
+  .s-def {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--sp-1);
+  }
+
+  .s-keys tbody th { width: auto; }
+  .s-keys th,
+  .s-keys td { padding-right: var(--sp-2); }
+
+  /* one control per row, each group filling it, so the segmented
+     buttons are as wide as the thumb wants rather than as wide as
+     their two-character label */
+  .s-controls { grid-template-columns: minmax(0, 1fr); }
+  .s-controls .seg-control { display: flex; }
+  .s-controls .seg-control button { flex: 1; }
+
+  /* stacked, the two opml actions are full-width targets rather than
+     two small buttons sharing a line */
+  .s-data-actions { flex-direction: column; align-items: stretch; }
+}

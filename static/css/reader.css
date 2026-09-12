@@ -1,0 +1,597 @@
+/* ──────────────────────────────────────────────────────────────
+   READER
+   The one pane where someone else's HTML is rendered inside ours.
+   Two jobs, in this order:
+
+   1. CONTAIN. Item.Body is readability-extracted third-party HTML,
+      injected with templ.Raw — unescaped and unsanitised. Until that
+      is fixed on the Go side (see the report), every rule in the
+      .prose block below is the only thing standing between a sloppy
+      or hostile feed and the app's layout. Width, overflow, stacking
+      and positioning are all pinned here on purpose.
+   2. READ. A single measure, a real typographic scale for everything
+      readability actually emits (h2–h4, lists, quotes, code, figures,
+      tables), and a progress bar, because these scrolls are long.
+   ────────────────────────────────────────────────────────────── */
+
+/* the measure collapses to the pane on narrow screens rather than
+   forcing a horizontal scroll */
+.reader {
+  --reader-measure: min(var(--measure), 100%);
+
+  position: relative;
+  height: 100%;
+  min-height: 0;
+  background: var(--paper);
+
+  /* the scrollport lives on .reader itself rather than on an inner
+     div, because templates/oob.templ renders the reset state as a
+     bare <section class="reader"> that this file cannot add a class
+     to — so .reader alone has to be a working scrollport. */
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: var(--rule-strong) transparent;
+
+  /* htmx swaps the whole section; without this the new article keeps
+     the outgoing one's scroll offset for a frame */
+  overscroll-behavior: contain;
+}
+.reader::-webkit-scrollbar { width: 10px; }
+.reader::-webkit-scrollbar-track { background: transparent; }
+.reader::-webkit-scrollbar-thumb { background: var(--rule-strong); border: 3px solid var(--paper); }
+.reader::-webkit-scrollbar-thumb:hover { background: var(--ink-4); }
+
+/* ══════════════════════════════════════════════════════════════
+   ACTIONS BAR
+   Sticky to the top of the reader's own scrollport, not the viewport,
+   so star / read / open stay reachable 4000 words in.
+   ══════════════════════════════════════════════════════════════ */
+
+.reader-actions {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: var(--topbar-h);
+  /* --pane-l/--pane-r are --pane-x plus the safe-area inset (defined
+     on .app in shell.css). Below 960px this bar is the full width of
+     the screen, so in landscape on a notched phone the back button
+     would otherwise sit under the camera housing. */
+  padding: var(--sp-1) var(--pane-r) var(--sp-1) var(--pane-l);
+  background: var(--paper-sub);
+  border-bottom: 1px solid var(--rule);
+}
+
+.ra-side {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  min-width: 0;   /* lets .ra-feed ellipsis instead of pushing the bar wide */
+}
+.ra-side:first-child { flex: 1 1 auto; }
+.ra-end { flex: 0 0 auto; gap: var(--sp-1); }
+
+/* the feed name truncates in CSS. The template used to call
+   Truncate(title, 20), which slices by byte and will cut a multi-byte
+   rune in half; this is both correct and responsive. */
+.ra-feed {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-micro);
+}
+
+/* only exists below 960px, where the reader overlays the list and
+   there is otherwise no way back. It is the single most important
+   control on the phone layout — it is the "pop" half of a push/pop —
+   so unlike the other icon buttons it is given a visible edge rather
+   than being a bare glyph floating on the bar. */
+.reader-back { display: none; flex: 0 0 auto; }
+.arw-rev { transform: scaleX(-1); }
+
+/* ── TOGGLES ──
+   aria-pressed carries the state; the label never changes, so a
+   screen reader announces "star, toggle button, pressed" rather than
+   a different button appearing where the old one was. The fill of the
+   glyph is the visual half of the same signal. */
+.reader-toggle .ic { fill: none; transition: fill var(--dur-fast) ease, color var(--dur-fast) ease; }
+.reader-toggle[aria-pressed="true"] { color: var(--ink); }
+.reader-toggle[aria-pressed="true"] .ic { fill: currentColor; }
+.reader-toggle[aria-pressed="true"]:hover { color: var(--ink-2); }
+
+.reader-original .ic { flex: 0 0 auto; }
+
+/* ── READING PROGRESS ──
+   Pinned to the bottom edge of the sticky bar, covering the hairline
+   as it advances. app.js writes --read-progress (0–1) on #reader from
+   the scroll position; with no JS the bar simply stays at zero width. */
+.read-progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  background: var(--navy);
+  transform: scaleX(var(--read-progress, 0));
+  transform-origin: 0 50%;
+  will-change: transform;
+  pointer-events: none;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   ARTICLE HEAD
+   ══════════════════════════════════════════════════════════════ */
+
+.reader-inner {
+  padding: var(--sp-5) var(--pane-r) var(--sp-6) var(--pane-l);
+}
+
+.reader-head,
+.reader-inner > .prose,
+.reader-nobody,
+.reader-nav {
+  max-width: var(--reader-measure);
+  margin-inline: auto;
+}
+
+.reader-head { margin-bottom: var(--sp-4); }
+
+/* Was a six-field run separated by "·". A term/value pair per field
+   is scannable at a glance and survives wrapping, where a dot-soup
+   line breaks in the middle of a date. */
+.reader-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px var(--sp-3);
+  margin-bottom: var(--sp-3);
+  font-family: var(--font-mono);
+  font-size: var(--fs-nano);
+  letter-spacing: 0.1em;
+  color: var(--ink-3);
+}
+.rm-pair {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+.rm-pair dt { color: var(--ink-4); }
+.rm-pair dd {
+  color: var(--ink-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.reader-title {
+  font-family: var(--font-sans);
+  font-size: var(--fs-h1);
+  font-weight: 700;
+  line-height: var(--lh-display);
+  letter-spacing: -0.035em;
+  color: var(--ink);
+  /* a single unbroken word in a headline must not widen the pane */
+  overflow-wrap: anywhere;
+}
+
+.reader-byline {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px var(--sp-2);
+  margin-top: var(--sp-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-label);
+  color: var(--ink-3);
+  min-width: 0;
+}
+/* a drawn rule rather than a typed slash */
+.rb-sep {
+  width: 14px;
+  height: 1px;
+  background: var(--rule-strong);
+  flex: 0 0 auto;
+}
+.reader-source {
+  color: var(--ink-3);
+  max-width: 34ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--rule-strong);
+  transition: color var(--dur-fast) ease, border-color var(--dur-fast) ease;
+}
+.reader-source:hover { color: var(--ink); border-color: var(--navy); }
+
+/* The lead is only rendered when the abstract is NOT just the opening
+   of the body (see abstractEchoesBody in reader.templ) — otherwise
+   every article began by repeating its own first paragraph. */
+.reader-lead {
+  margin-top: var(--sp-4);
+  padding-left: var(--sp-3);
+  border-left: 1px solid var(--rule-strong);
+  font-family: var(--font-mono);
+  font-size: var(--fs-lead);
+  line-height: var(--lh-body);
+  color: var(--ink-2);
+}
+
+/* ══════════════════════════════════════════════════════════════
+   PROSE — THE CONTAINMENT BOUNDARY
+
+   Everything inside .prose is third-party HTML that arrives on this
+   page unescaped. It gets sanitised properly on the Go side or not at
+   all; CSS cannot stop a <script>. What CSS *can* do is cap the blast
+   radius of everything short of script execution:
+
+     · contain: layout    makes .prose the containing block for any
+                          position:fixed descendant, so a feed cannot
+                          pin an element over the sidebar or the modal
+                          host.
+     · isolation: isolate confines injected z-index to this subtree.
+     · max-width on every  a stylesheet max-width still beats an inline
+       descendant          width:4000px, so a wide element is clamped
+                           rather than widening the whole app.
+     · overflow-wrap       an unbroken 900-character URL wraps instead
+                           of forcing a horizontal scrollbar.
+
+   None of that is a substitute for sanitisation. It is damage control
+   while the real fix is pending.
+   ══════════════════════════════════════════════════════════════ */
+
+.prose {
+  max-width: var(--reader-measure);
+  font-family: var(--font-mono);
+  font-size: var(--fs-prose);
+  line-height: var(--lh-prose);
+  color: var(--ink-2);
+  overflow-wrap: anywhere;
+  word-break: normal;
+  contain: layout;
+  isolation: isolate;
+  position: relative;
+  z-index: 0;
+}
+
+/* nothing a feed ships may exceed the measure, whatever it asks for */
+.prose * { max-width: 100%; }
+
+.prose > :first-child { margin-top: 0; }
+.prose > :last-child { margin-bottom: 0; }
+
+.prose p { margin: 0 0 var(--sp-3); }
+
+/* readability emits h2–h4; sans for the same reason the pane titles
+   use it — headings are structure, the body is text */
+.prose h1, .prose h2, .prose h3, .prose h4, .prose h5, .prose h6 {
+  font-family: var(--font-sans);
+  color: var(--ink);
+  line-height: var(--lh-heading);
+  letter-spacing: -0.02em;
+  margin: var(--sp-5) 0 var(--sp-2);
+}
+.prose h1, .prose h2 { font-size: var(--fs-h2); font-weight: 700; }
+.prose h3 { font-size: var(--fs-h3); font-weight: 600; }
+.prose h4, .prose h5, .prose h6 { font-size: var(--fs-h4); font-weight: 600; }
+
+/* base.css strips list markers globally (the app's own lists are
+   navigation, not prose). Inside an article they carry meaning, so
+   they come back. */
+.prose ul, .prose ol {
+  margin: 0 0 var(--sp-3);
+  padding-left: var(--sp-4);
+}
+.prose ul { list-style: disc; }
+.prose ol { list-style: decimal; }
+.prose li { margin-bottom: var(--sp-1); }
+.prose li::marker { color: var(--ink-4); }
+.prose ul ul, .prose ol ol, .prose ul ol, .prose ol ul { margin: var(--sp-1) 0 0; }
+.prose ul ul { list-style: circle; }
+
+.prose blockquote {
+  margin: var(--sp-4) 0;
+  padding-left: var(--sp-3);
+  border-left: 2px solid var(--rule-strong);
+  color: var(--ink-3);
+}
+.prose blockquote p:last-child { margin-bottom: 0; }
+
+/* base.css removes underlines app-wide; a link inside someone's
+   article must still look like a link */
+.prose a {
+  color: var(--navy);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+  text-decoration-color: var(--rule-strong);
+  transition: text-decoration-color var(--dur-fast) ease;
+}
+.prose a:hover { text-decoration-color: var(--navy); }
+
+.prose strong, .prose b { color: var(--ink); font-weight: 600; }
+.prose em, .prose i { font-style: italic; }
+.prose mark { background: var(--tint-2); color: var(--ink); }
+.prose small { font-size: var(--fs-label); color: var(--ink-3); }
+.prose sub, .prose sup { font-size: var(--fs-nano); line-height: 0; }
+
+.prose code {
+  font-family: var(--font-mono);
+  font-size: var(--fs-code);
+  background: var(--paper-2);
+  border: 1px solid var(--rule);
+  padding: 1px 4px;
+}
+.prose pre {
+  margin: var(--sp-3) 0;
+  padding: var(--sp-3);
+  background: var(--paper-2);
+  border: 1px solid var(--rule);
+  font-size: var(--fs-code);
+  line-height: var(--lh-body);
+  /* code must scroll inside its own box; wrapping it is a lie and
+     letting it overflow drags the whole pane sideways */
+  overflow-x: auto;
+  white-space: pre;
+  overflow-wrap: normal;
+}
+.prose pre code {
+  background: none;
+  border: 0;
+  padding: 0;
+  white-space: inherit;
+}
+
+.prose img, .prose video, .prose canvas, .prose object, .prose embed {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: var(--sp-4) auto;
+  background: var(--paper-2);
+}
+.prose iframe {
+  display: block;
+  max-width: 100%;
+  width: 100%;
+  margin: var(--sp-4) auto;
+  border: 1px solid var(--rule);
+}
+.prose figure { margin: var(--sp-4) 0; }
+.prose figure img { margin: 0; }
+.prose figcaption {
+  margin-top: var(--sp-2);
+  font-size: var(--fs-label);
+  line-height: var(--lh-body);
+  color: var(--ink-3);
+}
+.prose picture, .prose source { display: contents; }
+
+/* A table cannot be wrapped in a scroll container from CSS — the HTML
+   is raw and there is no wrapper element to target — so the table
+   becomes its own scrollport. This is the one place the layout mode
+   is overridden rather than the geometry. */
+.prose table {
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  overflow-x: auto;
+  margin: var(--sp-4) 0;
+  border-collapse: collapse;
+  font-size: var(--fs-code);
+  font-variant-numeric: tabular-nums;
+}
+.prose th, .prose td {
+  padding: var(--sp-1) var(--sp-2);
+  border: 1px solid var(--rule);
+  text-align: left;
+  vertical-align: top;
+}
+.prose th { color: var(--ink); font-weight: 600; background: var(--tint); }
+.prose caption {
+  margin-bottom: var(--sp-2);
+  font-size: var(--fs-label);
+  color: var(--ink-3);
+  text-align: left;
+}
+
+.prose hr {
+  margin: var(--sp-5) 0;
+  height: 0;
+  border: 0;
+  border-top: 1px solid var(--rule);
+}
+
+.prose dl { margin: 0 0 var(--sp-3); }
+.prose dt { color: var(--ink); font-weight: 600; margin-top: var(--sp-2); }
+.prose dd { margin-left: var(--sp-3); }
+
+/* ══════════════════════════════════════════════════════════════
+   NO BODY
+   Replaces ~250 words of fabricated article prose that used to render
+   whenever extraction returned nothing. An honest dead end with a way
+   out beats invented text attributed to someone else.
+   ══════════════════════════════════════════════════════════════ */
+
+.reader-nobody {
+  padding: var(--sp-5) 0;
+  border-top: 1px solid var(--rule);
+  border-bottom: 1px solid var(--rule);
+}
+
+/* ══════════════════════════════════════════════════════════════
+   PREV / NEXT
+   Real anchors with real hrefs. These were <a> with only hx-get, so a
+   keyboard user tabbed straight past them; the unavailable direction
+   was a styled <span> that looked identical to the live one.
+   ══════════════════════════════════════════════════════════════ */
+
+.reader-nav {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--sp-3);
+  margin-top: var(--sp-6);
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--rule);
+}
+
+.rn-link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: 32px;
+  padding: var(--sp-1) 0;
+  font-family: var(--font-mono);
+  font-size: var(--fs-ui);
+  letter-spacing: 0.06em;
+  color: var(--ink-3);
+  transition: color var(--dur-fast) ease;
+}
+.rn-link:hover { color: var(--ink); }
+
+/* dimmed to the inactive-control step and out of the tab order by
+   virtue of being a <span> — the disabled direction is unmistakable */
+.rn-link.is-disabled { color: var(--ink-4); }
+.rn-link.is-disabled i.arw { width: var(--arw-w, 14px); }
+
+/* ══════════════════════════════════════════════════════════════
+   EMPTY
+   ══════════════════════════════════════════════════════════════ */
+
+.reader-empty {
+  min-height: 100%;
+  display: grid;
+  place-items: center;
+  padding: var(--sp-4);
+}
+.re-keys {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--sp-1) var(--sp-3);
+  max-width: none;
+}
+.re-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   RESPONSIVE
+   Below 960px the shell overlays the reader on the list via
+   [data-pane] on .app, so this pane is the whole screen and needs its
+   own way back.
+   ══════════════════════════════════════════════════════════════ */
+
+@media (max-width: 1279px) {
+  .reader-inner { padding-top: var(--sp-4); }
+}
+
+/* Below 960px this pane IS the screen: the shell slides it in over the
+   list and [data-pane] on .app decides which of the two is showing.
+   The breakpoint string matches app.js's mqOnePane exactly — see the
+   header of shell.css. */
+@media (max-width: 959px) {
+  .reader-back {
+    display: inline-flex;
+    /* a bordered control, not a bare arrow. The back affordance has to
+       be findable in the first half-second on a screen that just
+       replaced itself; every other button on this bar is a quiet
+       glyph, and this one should not read as one of them. */
+    border-color: var(--rule-strong);
+    color: var(--ink-2);
+  }
+  .reader-back:hover { border-color: var(--navy); }
+  /* the arrow is 14px in a 44px button, which reads as a speck — the
+     shared --arw-w hook widens it without touching the primitive */
+  .reader-back .arw { --arw-w: var(--sp-3); }
+
+  /* every target on the bar clears 44px on its smallest dimension:
+     back, star, read, re-fetch, open-original */
+  .reader-actions .btn-icon { width: var(--touch); height: var(--touch); }
+  .reader-actions .btn-sm { min-height: var(--touch); padding: 0 var(--sp-2); }
+
+  /* --sp-3 rather than --pane-x, plus the landscape safe-area inset:
+     a 16.5px measure wants every pixel it can get at 360px wide */
+  .reader-inner {
+    padding: var(--sp-4) calc(var(--sp-3) + var(--safe-r)) var(--sp-6) calc(var(--sp-3) + var(--safe-l));
+  }
+
+  /* the sticky bar must not collapse into the content when the pane
+     becomes the viewport, and it now has to be at least one 44px
+     control tall plus its own padding */
+  .reader-actions { min-height: calc(var(--touch) + var(--sp-1) * 2); }
+
+  /* clamp(28px, 3.4vw, 40px) bottoms out at 28px here, which is still
+     a page-opening headline on a 360px column */
+  .reader-title { font-size: var(--fs-h2); }
+
+  /* prev/next were 32px tall and sit side by side at the foot of a
+     long scroll, where a mis-tap means reading the wrong article */
+  .rn-link { min-height: var(--touch); }
+}
+
+/* the label on prev/next is the useful half on a phone; the arrow
+   alone is ambiguous, so the labels stay and the gap tightens.
+   "open original" loses its text and keeps its glyph — it is the one
+   action on the bar that leaves the app, and its .visually-hidden
+   sibling span keeps the accessible name intact. */
+@media (max-width: 479px) {
+  .reader-original span:not(.visually-hidden) { display: none; }
+  .reader-nav { gap: var(--sp-2); }
+  /* with the label gone the button is ~30px wide; it is still a target */
+  .reader-actions .btn-sm { min-width: var(--touch); }
+  /* the feed name competes with five controls for a 360px bar and is
+     the only thing on it that is also two lines further down the page,
+     in .reader-meta. The title attribute stays, so it is still
+     recoverable by long-press. */
+  .ra-feed { display: none; }
+}
+
+/* ══ SHORT VIEWPORTS ══
+   Landscape phone, ~700×360. The shell has taken the topbar down to
+   44px and removed the status bar; this pane's own sticky bar is the
+   remaining piece of fixed chrome, and between the two of them a
+   44px-tall reader bar plus a 44px topbar is a quarter of the screen
+   before a word of the article. The bar keeps its targets and loses
+   its padding, and the article's opening gap closes up, which is
+   where the vertical space actually goes. */
+@media (max-height: 480px) and (orientation: landscape) {
+  .reader-actions { min-height: var(--touch); padding-top: 0; padding-bottom: 0; }
+  .reader-inner { padding-top: var(--sp-3); padding-bottom: var(--sp-5); }
+  .reader-head { margin-bottom: var(--sp-3); }
+}
+
+/* ══ RE-FETCH ══
+   Extraction fails quietly and often — a paywall, a JS-rendered page, a
+   feed that publishes summaries only — and the refresh cycle now
+   deliberately skips items it already has, so without this control a
+   half-extracted article stayed half-extracted forever.
+
+   The spin is driven by htmx's own .htmx-request class rather than by
+   any state we track, so the control cannot claim to be working when it
+   isn't. Reduced-motion is handled globally in base.css, which zeroes
+   the duration; the icon then simply sits still while disabled. */
+.reader-refetch .ic-refetch {
+  transform-origin: 50% 50%;
+  transition: transform var(--dur) var(--ease);
+}
+.reader-refetch:hover .ic-refetch { transform: rotate(-45deg); }
+
+.reader-refetch.htmx-request {
+  pointer-events: none;
+  color: var(--ink-4);
+}
+.reader-refetch.htmx-request .ic-refetch {
+  animation: refetch-spin 0.9s linear infinite;
+  transform: none;
+}
+@keyframes refetch-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}

@@ -1,0 +1,246 @@
+/* ──────────────────────────────────────────────────────────────
+   STATUS BAR — the footer strip, #status
+
+   This bar is 28px tall and used to carry eleven things: the view
+   name, two counts, six permanent keyboard hints, a separator and
+   the sync line. Below ~1400px the flex row ran out of room and the
+   tail silently clipped — which meant the last-sync time, the only
+   thing on the bar that changes on its own, was the first item to
+   disappear. Two decisions follow from that:
+
+   1. The six hotkey hints are gone. They were a tutorial pinned
+      permanently to the chrome, teaching the same six bindings on
+      every screen forever, and the full table already lives on the
+      settings page. What replaces them is a single `?` affordance
+      that navigates there — one 20px target instead of ~360px of
+      static text, and the space goes back to the live data.
+
+   2. Nothing here clips. The groups shrink in a documented priority
+      order and then segments are removed outright by media query, so
+      what you lose at a narrow width is a decision rather than an
+      accident of the box model.
+   ────────────────────────────────────────────────────────────── */
+
+.status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  /* --status-total is --status-h plus env(safe-area-inset-bottom),
+     defined on .app in shell.css; it is identical to --status-h on
+     every device without a home indicator. The plate bleeds to the
+     bottom edge and the padding holds the type above the indicator —
+     the alternative, a 28px bar floating 34px up the screen with the
+     paper showing beneath it, reads as a rendering fault. */
+  height: var(--status-total);
+  padding: 0 var(--pane-r) var(--safe-b) var(--pane-l);
+  background: var(--paper-sub);
+  border-top: 1px solid var(--rule);
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  line-height: 1;
+  letter-spacing: 0.04em;
+  color: var(--ink-3);
+  /* every number on this bar is replaced by the 15-minute poll; without
+     tabular figures the whole row re-flows each time a count ticks */
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+}
+
+/* THE TWO GROUPS
+   min-width: 0 on both is what actually lets the flex children shrink
+   at all — without it the default `min-width: auto` pins each group to
+   its content width and the overflow is pushed out of the bar. */
+.st-live,
+.st-sync {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.st-live { gap: 0; }          /* segments carry their own inset + rule */
+.st-sync { gap: var(--sp-2); flex-shrink: 0; }
+
+/* SEGMENTS
+   Separated by a hairline border-left rather than a `·` glyph. A glyph
+   is a character: it inherits the font, sits on the baseline, reflows
+   with the text and has to be hand-spaced. A 1px rule is a rule — it
+   is full-height, optically centred, and costs nothing to align. */
+.st-seg {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 var(--sp-2);
+  white-space: nowrap;
+}
+.st-seg:first-child { padding-left: 0; }
+.st-seg + .st-seg {
+  border-left: 1px solid var(--rule);
+  /* the rule spans the type, not the whole 28px bar — a full-bleed
+     divider in a strip this short reads as a table cell */
+  height: 13px;
+}
+
+/* SHRINK PRIORITY
+   Higher flex-shrink = gives up width sooner. The order is the reverse
+   of how much the segment tells you about right now:
+     feeds (4)  — a number that changes when you add a feed, i.e. never
+     view  (2)  — also printed at the top of the list pane
+     items (0)  — only meaningful while a filter or search is active
+     unread(0)  — the reason the app is open; it never shrinks
+   In practice only the view name has compressible content, so the
+   media queries below do the real work; these values decide who goes
+   first if a future segment lands here. */
+.st-feeds  { flex-shrink: 4; }
+.st-view   { flex-shrink: 2; min-width: 0; }
+.st-items  { flex-shrink: 0; }
+.st-unread { flex-shrink: 0; }
+
+/* The view name is the one string here of unbounded length (it can be
+   a feed or folder title someone else wrote). It gets an ellipsis and
+   a title attribute — a truncation you can see and recover from, which
+   is the opposite of the silent clip this bar did before. */
+.st-view {
+  color: var(--ink-2);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.st-of { color: var(--ink-4); }
+
+/* UNREAD — the one count worth emphasising, so it is the one count
+   that gets the full ink and a mark of its own. Colour alone never
+   carries state in this system: the dot is a shape, and the number
+   still reads correctly without it. */
+.st-unread { color: var(--ink-4); }
+.st-unread.has-unread { color: var(--ink); font-weight: 500; }
+
+.st-dot {
+  display: block;
+  width: 5px;
+  height: 5px;
+  flex-shrink: 0;
+}
+.st-dot-unread { background: var(--ok); }
+.st-dot-live   { background: var(--live); }
+
+.st-sync-state {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+
+.st-time { color: var(--ink-3); white-space: nowrap; }
+
+/* the shared .btn-icon is 28px square, which is the entire height of
+   this bar — one pixel of border would push the footer taller */
+.st-help {
+  width: 20px;
+  height: 20px;
+  font-size: var(--fs-label);
+  flex-shrink: 0;
+}
+
+/* NO FLASH ON POLL
+   base.css dims any element mid-swap to 0.55 so a pane does not vanish
+   under the reader's eye. That is right for a pane the user asked for
+   and wrong for a footer that re-fetches itself every fifteen minutes
+   unprompted — a bar blinking on its own timer reads as a fault. The
+   content is identical width-for-width, so there is nothing to cover. */
+#status.htmx-swapping { opacity: 1; }
+
+/* ══ OVERFLOW DISCIPLINE ══
+   Explicit removal, in priority order. Deliberately not `overflow:
+   hidden` on the bar: that is exactly what produced today's bug, where
+   content was still laid out and merely painted out of view, so the
+   bar looked fine at every width and was wrong at most of them. */
+
+/* the feed count is standing data — it belongs on the manage page and
+   is the first thing anyone would drop from a crowded strip */
+@media (max-width: 1100px) {
+  .st-feeds { display: none; }
+}
+
+/* The view name is the heading of the list pane, which is on screen at
+   every width where this bar is, so it is duplication the moment the
+   bar is under any pressure at all.
+
+   This threshold was 760px, which was too eager by a long way: it also
+   took the item count, the sync time and the ? control with it, so
+   everything from a 759px window down to a 360px phone showed the same
+   two facts while a 640px phone had room for five. The segments now
+   come off one at a time, at the width each one actually stops
+   fitting, and the ? control never comes off at all. */
+@media (max-width: 900px) {
+  .st-view { display: none; }
+  /* NOT :first-child — `+` and :first-child are structural and do not
+     notice display:none, so the hidden .st-view still hands .st-items a
+     border-left, which paints a stray hairline at the bar's left edge */
+  .st-items { padding-left: 0; border-left: 0; }
+}
+
+/* n/m is only meaningful while a filter or a search is narrowing the
+   list, and the list's own crumb prints the same count directly above
+   it. At 520px the left group has to be one fact, and that fact is
+   unread. */
+@media (max-width: 520px) {
+  .st-items { display: none; }
+  .st-unread { padding-left: 0; border-left: 0; }
+}
+
+/* The bar is now "● 9 unread" on the left and "● 4m ago ?" on the
+   right — about 170px of content in 340px of room at the narrowest
+   supported width, which fits with the gap to spare. Below 400px it
+   does not, and the sync time is the half of the right-hand group that
+   the dot already summarises, so it goes visually and stays in the
+   accessibility tree: the dot alone means nothing to anyone who cannot
+   see it, and "last sync 4m ago" is three words a reader may want. */
+@media (max-width: 400px) {
+  .status { gap: var(--sp-2); }
+  .st-time {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}
+
+/* ══ TOUCH ══
+   At 28px this bar was shorter than the 44px minimum by a wide margin
+   and its one control, the ? that navigates to the shortcut table, was
+   a 20px square — so the previous pass simply deleted the control
+   below 760px rather than size it. That is the wrong trade: with the
+   sidebar shut, the ? is the only route out of the chrome to settings
+   on a phone.
+
+   So below the one-pane breakpoint the bar becomes --touch tall, which
+   makes the ? a real 44px target and, incidentally, makes the unread
+   count legible at arm's length. It costs 16px of a 640px screen; the
+   landscape rule in shell.css removes the whole bar on the one class
+   of device that cannot afford even that. */
+@media (max-width: 959px) {
+  /* the height itself is set on .app in shell.css, which owns the
+     frame — doing it here would load after shell.css and clobber the
+     landscape rule that zeroes this row */
+  .status { font-size: var(--fs-label); }
+  .st-help {
+    width: var(--touch);
+    height: var(--touch);
+    font-size: var(--fs-code);
+    /* a bare glyph on a plate is not obviously a control at finger
+       size; the hairline says "this is a button" */
+    border-color: var(--rule);
+  }
+  /* the divider rules were cut to 13px to suit a 28px strip */
+  .st-seg + .st-seg { height: var(--sp-3); }
+}
+
+/* the bar is chrome, and chrome does not belong on a printed article */
+@media print {
+  .status { display: none; }
+}

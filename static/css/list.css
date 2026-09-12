@@ -1,0 +1,458 @@
+/* ──────────────────────────────────────────────────────────────
+   LIST PANE
+   The middle column: a scan surface. Everything here is in service
+   of one question — "which of these do I open?" — so the row gives
+   exactly four facts (state, title, source, cost-to-read) and the
+   pane gives one control cluster (scope, sort); density is a set-once
+   preference and lives in settings.
+
+   Two structural fixes are encoded below:
+   1. the row is a <div class="item-row"> wrapping an <a class="item">
+      and a sibling <button class="star">, because the star used to be
+      a <button> nested inside the <a> and neutralised with an inline
+      onClick — invalid markup held together by a JS patch;
+   2. the numeral column is gone and the unread state now lives in a
+      3px rail at the left edge, so state is carried by position as
+      well as colour.
+   ────────────────────────────────────────────────────────────── */
+
+.list {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+  background: var(--paper);
+  /* the pane owns its own divider, as it did before the refactor —
+     the shell must not add a second one on this edge */
+  border-right: 1px solid var(--rule);
+}
+
+/* ══ HEAD ══
+   Recessed against the paper so the scroll surface below reads as the
+   content plane. Sticky is belt-and-braces: the body is its own
+   scrollport at desktop, but at one-pane widths the whole column can
+   become the scroller. */
+/* Two columns: the crumb and title stack on the left, the sort control
+   sits in the top-right corner of the same box. It used to own a third
+   row under the title, which cost a full line of vertical space in a
+   sticky header — space the list itself should have. Pinned to the top
+   edge (align-items: start) so it lines up with the crumb rather than
+   drifting down beside a two-line title. */
+.list-head {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  column-gap: var(--sp-3);
+  row-gap: var(--sp-2);
+  /* --pane-l/--pane-r are --pane-x plus the safe-area inset, defined
+     on .app in shell.css. They are identical to --pane-x on every
+     desktop browser and on every phone in portrait; they only differ
+     in landscape on a notched device, where this pane runs to the
+     physical edge of the screen and the title would otherwise start
+     underneath the camera housing. */
+  padding: var(--sp-3) var(--pane-r) var(--sp-3) var(--pane-l);
+  background: var(--paper-sub);
+  border-bottom: 1px solid var(--rule);
+}
+.list-head-main { min-width: 0; }
+
+.list-crumb {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-1);
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+}
+/* text-overflow on the flex container does nothing — the ellipsis has
+   to be on the box that holds the text. Without this the crumb was
+   hard-clipped mid-word at any width where the sort trigger took the
+   room ("index / unread · 42 item"), and the count — the half that is
+   actually live data — was the half that got cut. The breadcrumb
+   truncates; the dot and the count never do. */
+.list-crumb > :first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.list-crumb > .list-dot,
+.list-crumb > .tnum { flex: 0 0 auto; }
+.list-dot { color: var(--ink-4); }
+
+/* The h1 step is sized for a pane that owns the viewport width. This
+   column is 340–440px, where 40px turns a three-word feed title into
+   three lines of chrome, so the list takes the next step down and
+   clamps. Same role, appropriate measure. */
+.list-head .pane-title {
+  font-size: var(--fs-h2);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.list-tools {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  /* the trigger is the widest thing that may sit here; keeping the
+     column auto-sized means a long view title never pushes it off */
+  justify-self: end;
+}
+
+/* ══ SORT ══
+   A single collapsed trigger rather than a three-button segmented row.
+   Sort is read constantly and changed rarely, so the current order is
+   what earns permanent space; the alternatives only need to be one
+   click away. Density used to sit beside this as a second segmented
+   row — it moved to settings, where a set-once preference belongs,
+   which also gives the head back a line of vertical space.
+
+   <details> carries the open state, so the popover needs no JS and no
+   aria-expanded bookkeeping: the UA exposes it from the element. */
+.sort-menu { position: relative; }
+
+.sort-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: 5px 10px;
+  border: 1px solid var(--rule-strong);
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  letter-spacing: 0.05em;
+  color: var(--ink-3);
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+  transition: background-color var(--dur-fast) ease,
+              border-color var(--dur-fast) ease,
+              color var(--dur-fast) ease;
+}
+/* the default disclosure triangle is a second, redundant affordance
+   next to the drawn chevron in the icon */
+.sort-trigger::-webkit-details-marker { display: none; }
+.sort-trigger::marker { content: ""; }
+
+.sort-trigger:hover { background: var(--tint); border-color: var(--ink-4); color: var(--ink); }
+.sort-menu[open] .sort-trigger { background: var(--navy); border-color: var(--navy); color: var(--on-navy); }
+
+.sort-current { font-variant-numeric: tabular-nums; }
+
+.sort-pop {
+  position: absolute;
+  top: calc(100% + 4px);
+  /* right-aligned: the trigger now sits in the head's top-right corner,
+     so a left-aligned popover would hang off the pane's right edge */
+  right: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  min-width: 100%;
+  background: var(--paper-2);
+  border: 1px solid var(--rule-strong);
+  box-shadow: var(--shadow-panel);
+}
+
+.sort-opt {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 7px 12px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  letter-spacing: 0.05em;
+  color: var(--ink-3);
+  white-space: nowrap;
+  text-align: left;
+  transition: background-color var(--dur-fast) ease, color var(--dur-fast) ease;
+}
+.sort-opt:hover { background: var(--tint); color: var(--ink); }
+
+/* the selected order is marked with a leading rule rather than a
+   filled plate: the menu is a list of three, and a filled row in a
+   floating panel reads as hover, not as state */
+.sort-opt::before {
+  content: "";
+  width: 8px;
+  height: 1px;
+  background: currentColor;
+  opacity: 0;
+}
+.sort-opt[aria-pressed="true"] { color: var(--ink); }
+.sort-opt[aria-pressed="true"]::before { opacity: 1; }
+
+/* ══ BODY ══ */
+.list-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--row-gap);
+  min-height: 0;
+  /* a flick at the end of the list must not scroll the page behind it */
+  overscroll-behavior: contain;
+}
+
+/* ══ ROW ══
+   The positioning context for both the unread rail and the star, so
+   neither has to be a child of the anchor. */
+.item-row {
+  position: relative;
+  border-bottom: 1px solid var(--rule);
+  scroll-margin-block: var(--sp-4);
+}
+.item-row:last-child { border-bottom: 0; }
+
+.item {
+  position: relative;
+  display: grid;
+  /* content | date column — two tracks, not three. The rail is
+     position:absolute and therefore is NOT a grid item, so a leading
+     3px track had nothing in it and .item-main was auto-placed into
+     it instead: the title, meta and abstract were all laid out in a
+     3px column and clipped to a vertical sliver at the pane's left
+     edge. The rail's width is reserved with padding-left instead,
+     which is what an out-of-flow element needs. */
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: var(--sp-3);
+  /* the content edge sits on --pane-x, the same inset the list head
+     and the sidebar use, so all three line up down the left of the
+     app; the 3px rail lives inside that inset rather than adding to
+     it, which is why this is a plain token and not 3px + a gap.
+     --pane-l is that same token plus the landscape safe-area inset,
+     so the head above and the rows below stay on one line. */
+  padding-left: var(--pane-l);
+  align-items: start;
+  /* density lives here and only here */
+  padding-top: var(--row-y);
+  padding-bottom: var(--row-y);
+  /* right inset reserves the star gutter so the date never sits under it */
+  padding-right: calc(var(--pane-r) + var(--sp-3));
+  transition: background-color var(--dur-fast) ease;
+  /* j/k call scrollIntoView on this element, not the wrapper */
+  scroll-margin-block: var(--sp-4);
+}
+
+/* ══ UNREAD RAIL ══
+   Replaces the decorative 01/02/03 numerals. Unread is a state you
+   scan for down a single left edge, so it is drawn as a filled 3px
+   column at x=0: colour AND position, which means it survives
+   greyscale, a colour-blind reader, and a squint. Read rows leave the
+   track empty rather than filling it in a lighter ink — an empty
+   column is faster to scan than a two-value ramp. */
+.item-rail {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: transparent;
+}
+.item.unread .item-rail { background: var(--ok); }
+
+.item-main { min-width: 0; }
+
+.item-title {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font-family: var(--font-sans);
+  font-size: var(--fs-h3);
+  line-height: var(--lh-heading);
+  letter-spacing: -0.015em;
+  /* read is the resting state: lighter ink, regular weight */
+  font-weight: 400;
+  color: var(--ink-3);
+}
+.item.unread .item-title {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.item-meta {
+  display: block;
+  margin-top: 3px;
+  font-size: var(--fs-nano);
+  letter-spacing: 0.08em;
+  color: var(--ink-4);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.item-tag {
+  border: 1px solid var(--rule);
+  padding: 0 4px;
+}
+
+.item-abs {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  margin-top: var(--sp-1);
+  font-size: var(--fs-label);
+  line-height: var(--lh-body);
+  color: var(--ink-3);
+}
+
+.item-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  font-size: var(--fs-nano);
+  letter-spacing: 0.04em;
+  color: var(--ink-4);
+  white-space: nowrap;
+}
+
+/* ══ STATES ══
+   Three distinct things can be true of a row at once, so each gets a
+   different channel: hover is a tint, keyboard selection is a tint
+   plus a hairline, and "this is the article in the reader" is a
+   filled plate. Before this, hover and keyboard selection were the
+   same wash and the open article had no marker at all. */
+.item:hover { background: var(--tint); }
+
+.item.active { background: var(--tint-2); }
+/* sits just inside the unread rail so the two never overwrite */
+.item.active::before {
+  content: '';
+  position: absolute;
+  left: 4px;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--rule-strong);
+}
+
+.item[aria-current="true"] { background: var(--navy); }
+.item[aria-current="true"] .item-title { color: var(--on-navy); }
+.item[aria-current="true"] .item-meta,
+.item[aria-current="true"] .item-abs,
+.item[aria-current="true"] .item-right { color: var(--on-navy-3); }
+.item[aria-current="true"] .item-tag { border-color: var(--rule-on-navy); }
+.item[aria-current="true"] .item-rail { background: var(--on-navy); }
+.item-row:has(.item[aria-current="true"]) .star { color: var(--on-navy-3); }
+
+/* base.css flips the focus ring to paper on .item.active because the
+   active row used to be the navy plate. It is a tint now, so the navy
+   ring is the readable one; the plate moved to aria-current and takes
+   the paper ring with it. */
+.item.active :focus-visible { outline-color: var(--navy); }
+.item[aria-current="true"]:focus-visible,
+.item[aria-current="true"] :focus-visible { outline-color: var(--paper); }
+
+/* ══ STAR ══
+   A sibling of the anchor, overlaid on the row's right edge. Hidden
+   until the row is hovered or the button is focused so 40 stars do
+   not compete with 40 titles — but never hidden when it is on, since
+   that is the one time it carries information. */
+.star {
+  position: absolute;
+  top: var(--row-y);
+  right: var(--sp-1);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  color: var(--ink-4);
+  opacity: 0;
+  transition: opacity var(--dur-fast) ease, color var(--dur-fast) ease;
+}
+.item-row:hover .star,
+.star:hover,
+.star:focus-visible,
+.star[aria-pressed="true"] { opacity: 1; }
+.star:hover { color: var(--ink); }
+
+.star-i {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.2;
+  stroke-linejoin: round;
+}
+.star[aria-pressed="true"] { color: var(--warn); }
+/* filled outline, not colour alone — the state reads in greyscale */
+.star[aria-pressed="true"] .star-i { fill: currentColor; }
+
+/* ══ EMPTY ══
+   The old state was an inline-styled "nothing here. try another
+   view." with nothing to click. Both exits are real: a filtered view
+   offers the way back (which also clears any active search on the
+   server), an empty index offers the only thing that can fix it. */
+.list-empty { margin: auto 0; }
+
+/* ══ RESPONSIVE ══
+   One pane at a time below 960px: the divider has nothing to divide,
+   touch targets grow, and the star has to be permanently visible
+   because there is no hover on a finger.
+
+   The breakpoint is the same string app.js uses for mqOnePane — see
+   the header of shell.css. */
+@media (max-width: 959px) {
+  .list { border-right: 0; }
+
+  /* The row is the app's primary target on a phone and it is also the
+     one whose neighbours are a wrong destination rather than a no-op,
+     so it is sized from --touch and not from the density tokens. The
+     right inset clears the 44px star plus the safe-area edge. */
+  .item {
+    min-height: var(--touch);
+    padding-right: calc(var(--touch) + var(--sp-2) + var(--safe-r));
+  }
+  .star {
+    opacity: 1;
+    width: var(--touch);
+    height: var(--touch);
+    right: var(--safe-r);
+  }
+  /* the star is absolutely positioned from the row's top by --row-y,
+     which at "tight" density is 7px — on a 44px row that leaves the
+     glyph hanging below a one-line title. Centring it on the row is
+     both easier to hit and stable across all three densities. */
+  .star { top: 50%; transform: translateY(-50%); }
+
+  .list-head { padding: var(--sp-2) var(--pane-r) var(--sp-2) var(--pane-l); }
+
+  /* ── SORT, AT FINGER SIZE ──
+     The trigger and its three options were 26px and 28px tall: a
+     pointer size for a control whose options sit 4px apart, where a
+     miss silently re-sorts the list you were reading. */
+  .sort-trigger {
+    min-height: var(--touch);
+    padding: 0 var(--sp-3);
+  }
+  .sort-opt {
+    min-height: var(--touch);
+    padding: 0 var(--sp-3);
+  }
+
+  /* The popover is right-aligned to a trigger that is itself inset by
+     --pane-x, so it opens leftward and cannot reach the right edge of
+     the viewport. It could in principle reach the LEFT edge if a
+     future option were long enough — at 360px it has 324px to play
+     with and the longest label, "unread first", is about 100px — so
+     rather than rely on that holding, it is clamped to the pane. The
+     three options stay nowrap; the box docks instead of reflowing. */
+  .sort-pop {
+    max-width: calc(100vw - var(--pane-l) - var(--pane-r));
+    max-width: calc(100dvw - var(--pane-l) - var(--pane-r));
+  }
+}
+
+/* ══ SHORT VIEWPORTS ══
+   A landscape phone is ~360px tall. The shell has already dropped the
+   topbar to 44px and removed the status bar entirely; what this pane
+   owes in return is (a) not spending two lines of a 300px column on a
+   sticky title. The home-indicator clearance the vanished status row
+   used to provide is handled once, as padding on .app in shell.css,
+   rather than per-pane here. */
+@media (max-height: 480px) and (orientation: landscape) {
+  .list-head { padding-top: var(--sp-1); padding-bottom: var(--sp-1); }
+  .list-head .pane-title { -webkit-line-clamp: 1; font-size: var(--fs-h3); }
+}

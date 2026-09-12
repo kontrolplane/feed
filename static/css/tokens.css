@@ -1,0 +1,221 @@
+/* ──────────────────────────────────────────────────────────────
+   kontrolplane/feed — DESIGN TOKENS
+   Single source of truth, aligned with kontrolplane.dev.
+
+   The site and the app are one system: the same two inks, the same
+   two typefaces, the same ink ladder, the same motion pair. What the
+   app adds is a UI-density type scale — a reader is read at 13px in
+   a 260px rail, not at 88px across a 1440px shell — and a dark plate,
+   which the site does not need and a reader used at night does.
+   ────────────────────────────────────────────────────────────── */
+
+/* ══ TYPEFACES, SELF-HOSTED ══
+   Previously pulled from fonts.googleapis.com via @import, which is
+   the worst of both worlds: render-blocking, and it leaks every
+   reader's IP to a third party from an app whose entire premise is
+   that your reading data goes nowhere. One variable file per subset
+   covers 300–700, so the whole family is one request. */
+@font-face {
+  font-family: 'Space Grotesk';
+  font-style: normal;
+  font-weight: 300 700;
+  font-display: swap;
+  src: url('/static/fonts/space-grotesk-v22-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Space Grotesk';
+  font-style: normal;
+  font-weight: 300 700;
+  font-display: swap;
+  src: url('/static/fonts/space-grotesk-v22-latin-ext.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 100 800;
+  font-display: swap;
+  src: url('/static/fonts/jetbrains-mono-v24-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 100 800;
+  font-display: swap;
+  src: url('/static/fonts/jetbrains-mono-v24-latin-ext.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+:root {
+  /* ══ TWO INKS, NOTHING ELSE ══
+     Every colour below is one of these two, or one mixed into the
+     other — a duotone print job: one plate of ink on one stock. */
+  --cream: #F4E8C1;
+  --navy:  #14325C;
+
+  /* NAVY OVER CREAM — hierarchy by tint of the ink, not by new hues.
+     Ratios are measured against --paper. */
+  --ink:   #14325C;   /* 10.46:1 — titles, active state          */
+  --ink-2: #2A4466;   /*  8.08:1 — body copy                     */
+  --ink-3: #334B6A;   /*  7.24:1 — labels, meta, counts          */
+  --ink-4: #57697A;   /*  4.63:1 — inactive controls (AA floor)  */
+
+  /* SURFACES — the app needs three planes the site does not: the
+     paper itself, a recessed rail, and a raised panel. All three are
+     the same two inks, so the duotone holds. */
+  --paper:     #F4E8C1;
+  --paper-2:   #FBF3D8;  /* raised: modals, inputs, hovered rows */
+  --paper-sub: #EFE1B4;  /* recessed: the sidebar rail, list head */
+
+  /* the only "lift" a duotone has on paper is a tint of the ink */
+  --tint:        rgba(20, 50, 92, 0.05);
+  --tint-2:      rgba(20, 50, 92, 0.09);
+  --rule:        rgba(20, 50, 92, 0.12);
+  --rule-strong: rgba(20, 50, 92, 0.26);
+
+  /* CREAM OVER NAVY — the same ladder inverted, for the navy plates
+     (the active row, a filled button, the scrim). */
+  --on-navy:   var(--cream);
+  --on-navy-2: rgba(244, 232, 193, 0.92);
+  --on-navy-3: rgba(244, 232, 193, 0.84);
+  --rule-on-navy: rgba(244, 232, 193, 0.16);
+
+  /* ══ SIGNAL ══
+     Four states that must survive being desaturated or colour-blind,
+     so each is also carried by a glyph or a position — never colour
+     alone. Kept deliberately muted: they sit on cream, and a saturated
+     green next to this navy is the third colour the system doesn't have. */
+  --ok:   #3F7E4F;
+  --warn: #C99135;
+  --err:  #A23F3F;
+  --live: #2E9E4A;
+  --err-tint: rgba(162, 63, 63, 0.08);
+  /* text on a filled --err plate. Resolving to --cream means it is the
+     paper ink in light (cream on dark red) and the ground in dark
+     (near-black on light red) — one declaration that stays legible on
+     both plates, where a literal #FFF would drop to ~2.2:1 on the dark
+     theme's lighter red. */
+  --on-err: var(--cream);
+
+  /* ══ TYPE ══ */
+  --font-sans: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
+
+  /* UI LADDER (mono) — carried over from the site verbatim, because
+     these are the sizes both surfaces share. */
+  --fs-nav:     14px;   /* primary navigation                 */
+  --fs-eyebrow: 13px;   /* section introductions              */
+  --fs-ui:    12.5px;   /* buttons, inline links              */
+  --fs-label:   12px;   /* every label and meta line          */
+  --fs-code:    13px;   /* code, and the list's own body text */
+  --fs-micro:   11px;   /* counts, kbd, status bar            */
+  --fs-nano:    10px;   /* the smallest legible mono step     */
+
+  /* APP LADDER (sans) — the site's display clamps top out at 120px,
+     which is a page-opening headline. A pane heading is not that, so
+     the app has its own four steps rather than borrowing the bottom
+     of a scale built for a different job. */
+  --fs-h1:    clamp(28px, 3.4vw, 40px);  /* pane title            */
+  --fs-h2:    24px;                      /* section head in prose */
+  --fs-h3:    17px;                      /* list item title       */
+  --fs-h4:    15px;                      /* card title            */
+  --fs-prose: 16.5px;                    /* the reader's measure  */
+  --fs-lead:  14.5px;                    /* pane sub-line         */
+
+  --lh-display: 1.05;
+  --lh-heading: 1.25;
+  --lh-body:    1.55;
+  --lh-prose:   1.72;
+
+  --measure: 68ch;   /* the reader's line length */
+
+  /* ══ SPACE ══
+     One four-step ladder. Every pane's padding comes from here, so
+     the rails line up across the three columns instead of each pane
+     inventing its own inset. */
+  --sp-1: 6px;
+  --sp-2: 10px;
+  --sp-3: 16px;
+  --sp-4: 24px;
+  --sp-5: 36px;
+  --sp-6: 56px;
+
+  /* the pane inset — one value, so sidebar / list / reader agree */
+  --pane-x: 18px;
+
+  /* ══ FRAME ══
+     Fixed chrome heights, tokenised because the grid, the sticky
+     heads and the scroll offsets all have to agree with them. */
+  --topbar-h: 52px;
+  --status-h: 28px;
+  --rail-w:   264px;   /* sidebar          */
+  --list-w:   clamp(340px, 32vw, 440px);
+
+  /* ══ DENSITY ══
+     Set by [data-density] on .app; the list's row padding reads this
+     one variable rather than three parallel rulesets. */
+  --row-y: 11px;
+  --row-gap: 3px;
+
+  /* ══ MOTION ══
+     Colour and opacity settle fast; anything that moves or resizes
+     uses the slower pair. Same easing curve as the site. */
+  --dur-fast: 0.14s;
+  --dur:      0.26s;
+  --ease:     cubic-bezier(0.22, 1, 0.36, 1);
+
+  /* ══ ELEVATION ══
+     Two steps, both a tint of the ink — a neutral grey shadow is a
+     third colour and this palette has two. */
+  --shadow-soft:  0 2px 10px -3px rgba(20, 50, 92, 0.22);
+  --shadow-panel: 0 1px 2px rgba(20, 50, 92, 0.08), 0 18px 44px -22px rgba(20, 50, 92, 0.45);
+
+  --radius: 0px;   /* hairline aesthetic: the system has no radius */
+}
+
+/* ══ DENSITY STEPS ══ */
+.app[data-density="tight"] { --row-y: 7px;  --row-gap: 1px; }
+.app[data-density="loose"] { --row-y: 16px; --row-gap: 6px; }
+
+/* ══════════════════════════════════════════════════════════════
+   DARK PLATE
+   Not an inversion of the hex values — that would give a navy page
+   with cream text, which is the site's footer, not a reading surface
+   anyone wants at 1am. Instead the ladder is rebuilt on a near-black
+   ground with the cream kept as the ink, so the two-colour logic
+   holds and the contrast ratios land in the same places.
+   ══════════════════════════════════════════════════════════════ */
+[data-theme="dark"] {
+  --cream: #0E1117;
+  --navy:  #D7E2EE;
+
+  --ink:   #E6EDF5;
+  --ink-2: #C4D0DE;
+  --ink-3: #A3B2C4;
+  --ink-4: #78899C;
+
+  --paper:     #0E1117;
+  --paper-2:   #171C25;
+  --paper-sub: #12161E;
+
+  --tint:        rgba(215, 226, 238, 0.05);
+  --tint-2:      rgba(215, 226, 238, 0.09);
+  --rule:        rgba(215, 226, 238, 0.11);
+  --rule-strong: rgba(215, 226, 238, 0.24);
+
+  --on-navy:   #0E1117;
+  --on-navy-2: rgba(14, 17, 23, 0.92);
+  --on-navy-3: rgba(14, 17, 23, 0.84);
+  --rule-on-navy: rgba(14, 17, 23, 0.20);
+
+  --ok:   #4ADE80;
+  --warn: #FBBF24;
+  --err:  #F87171;
+  --live: #4ADE80;
+  --err-tint: rgba(248, 113, 113, 0.10);
+
+  --shadow-soft:  0 2px 10px -3px rgba(0, 0, 0, 0.6);
+  --shadow-panel: 0 1px 2px rgba(0, 0, 0, 0.4), 0 18px 44px -22px rgba(0, 0, 0, 0.9);
+}
