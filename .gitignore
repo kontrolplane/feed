@@ -1,6 +1,19 @@
+# Local databases
 feed.db
 feed.db-shm
 feed.db-wal
+
+# Build outputs. `make build` emits kontrolplane-feed; a bare
+# `go build ./cmd/server` emits `server`, which is how a 25 MB darwin/arm64
+# binary ended up committed to this repository (finding 17).
 kontrolplane-feed
+server
+
+# Local configuration
 .env
+
+# air scratch directory
 tmp/
+
+# OS noise
+.DS_Store

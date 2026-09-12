@@ -2,17 +2,23 @@ root = "."
 tmp_dir = "tmp"
 
 [build]
-  cmd = "$HOME/go/bin/templ generate && go build -o ./tmp/main ./cmd/server"
+  # Plain `templ`, not $HOME/go/bin/templ: `make deps` installs it into GOBIN,
+  # which is not necessarily $HOME/go/bin under a custom GOBIN/GOPATH.
+  cmd = "templ generate && go build -o ./tmp/main ./cmd/server"
   bin = "./tmp/main"
   delay = 500
   exclude_dir = ["tmp", "node_modules", ".git"]
   exclude_regex = ["_templ\\.go$"]
-  include_ext = ["go", "templ", "css", "js"]
+  # "sql" is required: internal/database/migrations/*.sql are go:embed-ed, so
+  # editing one changes the binary but previously triggered no rebuild.
+  include_ext = ["go", "templ", "css", "js", "sql"]
   include_dir = ["cmd", "internal", "templates", "static"]
   kill_delay = "1s"
   send_interrupt = true
 
 [build.env]
+  # Local development only. Deliberately NOT set in the compose files, which are
+  # the documented self-hosting quickstart (finding 22).
   DEVELOPMENT_SEED = "true"
   DEVELOPMENT_DEBUG = "true"
 

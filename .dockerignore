@@ -1,0 +1,51 @@
+# Everything the BuildKit context does not need. Finding 17: without this file
+# `COPY . .` uploaded the 25 MB committed darwin/arm64 `server` binary into the
+# build stage of every release, for both architectures.
+#
+# Patterns are matched against context-root-relative paths (Go filepath.Match
+# semantics, not gitignore semantics), so a bare name only matches at the root.
+# The build genuinely needs go.mod, go.sum, cmd/, internal/, templates/ (input
+# to `templ generate`) and static/ (served from disk at runtime) — none of them
+# may be listed here.
+
+# Git metadata and CI definitions.
+.git
+.gitignore
+.github
+
+# Host build outputs. `go build ./cmd/server` produces `server` and
+# `make build` produces `kontrolplane-feed`; both are host-native binaries that
+# would only bloat the context and shadow nothing useful.
+server
+kontrolplane-feed
+
+# air scratch directory and local SQLite databases.
+tmp
+*.db
+*.db-wal
+*.db-shm
+**/*.db
+**/*.db-wal
+**/*.db-shm
+
+# Local configuration that must never be baked into an image.
+.env
+.env.*
+
+# Tooling that only applies to a developer checkout.
+.air.toml
+docker-compose.yaml
+docker-compose.*.yaml
+Makefile
+.dockerignore
+
+# Documentation and screenshots.
+assets
+README.md
+LICENSE
+
+# Editor and OS noise.
+.DS_Store
+.idea
+.vscode
+*.swp

@@ -1,0 +1,15 @@
+# Overlay that builds the image from this checkout instead of pulling the
+# published one. Kept as a separate file rather than docker-compose.override.yaml
+# so it is opt-in; an override file would be picked up automatically and would
+# silently reintroduce the "quickstart needs a full Go toolchain" problem.
+#
+#   docker compose -f docker-compose.yaml          -f docker-compose.build.yaml up -d --build
+#   docker compose -f docker-compose.postgres.yaml -f docker-compose.build.yaml up -d --build
+
+services:
+  feed:
+    build:
+      context: .
+      args:
+        VERSION: dev
+    image: ghcr.io/kontrolplane/feed:dev

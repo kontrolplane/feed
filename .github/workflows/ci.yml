@@ -1,0 +1,138 @@
+name: ci
+
+# Finding 20: the repo had no CI at all. The first time anything compiled this
+# code was `release.yml`, i.e. after a release had already been published.
+#
+# `push` is limited to the default branch on purpose: every other branch is
+# already covered by `pull_request`, and running both would double every run
+# for no extra signal.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# The whole workflow is read-only. Nothing here pushes, comments or publishes.
+permissions:
+  contents: read
+
+# A new push to the same ref makes the in-flight run obsolete, so cancel it
+# rather than paying for a result nobody will look at.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# NOTE ON SUPPLY CHAIN: every `uses:` below is a mutable major tag. Hardening
+# would pin each one to a full 40-character commit SHA
+# (`actions/checkout@<sha> # v4`) with dependabot keeping them current. Left as
+# tags so this first CI diff stays reviewable — worth doing as a follow-up.
+
+env:
+  # Refuse to silently download a different Go toolchain than the one go.mod
+  # asks for. Same drift class as `templ@latest`: if something needs a newer
+  # toolchain, that should be a visible go.mod change, not a quiet swap in CI.
+  GOTOOLCHAIN: local
+
+jobs:
+  verify:
+    name: vet, build, test, fmt
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+
+      - name: set-up-go
+        uses: actions/setup-go@v5
+        with:
+          # Track go.mod rather than hardcoding a version here; there is
+          # already enough version drift in this repo.
+          go-version-file: go.mod
+          # Caches both the module cache (GOMODCACHE) and the build cache
+          # (GOCACHE), keyed on go.sum.
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: gofmt
+        # Generated templ output is excluded: it is produced by the templ CLI,
+        # not written by hand, and is not ours to reformat.
+        run: |
+          unformatted="$(gofmt -l . | grep -v '_templ\.go$' || true)"
+          if [ -n "$unformatted" ]; then
+            echo "::error::these files are not gofmt-formatted:"
+            echo "$unformatted"
+            echo
+            echo "run: gofmt -w ."
+            gofmt -d $(echo "$unformatted")
+            exit 1
+          fi
+
+      - name: go-vet
+        run: go vet ./...
+
+      - name: go-build
+        run: go build ./...
+
+      - name: go-test
+        # -race is not optional here. Finding 3 was a data race on shared
+        # handler state; this is the check that keeps it fixed, and a race
+        # detector only earns its keep if it runs on every change.
+        run: go test ./... -race
+
+  generated:
+    name: generated code is current
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+
+      - name: set-up-go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: resolve-templ-version
+        id: templ
+        # go.mod is the single source of truth for the templ version - the
+        # Dockerfile and the Makefile pin to the same value. Deriving it here
+        # instead of hardcoding it means this check can never silently drift.
+        #
+        # This matters: generating with CLI v0.3.1020 against runtime v0.3.1001
+        # broke the build with `undefined: templ.ResolveAttributeValue`. A
+        # floating `@latest` is exactly how that happens, so it appears nowhere
+        # in this repo.
+        run: |
+          version="$(go list -m -f '{{.Version}}' github.com/a-h/templ)"
+          if [ -z "$version" ]; then
+            echo "::error::could not resolve github.com/a-h/templ version from go.mod"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "templ CLI pinned to $version (from go.mod)"
+
+      - name: install-templ
+        run: go install github.com/a-h/templ/cmd/templ@${{ steps.templ.outputs.version }}
+
+      - name: templ-generate
+        run: templ generate
+
+      - name: check-generated-is-committed
+        # The _templ.go files are committed *and* regenerated in the Dockerfile.
+        # A contributor who edits a .templ and forgets to regenerate ships a
+        # repo where `make build` and the published image render different HTML.
+        run: |
+          if ! git diff --exit-code -- '*_templ.go'; then
+            echo "::error::generated templ output is out of date"
+            echo "run: templ generate  (CLI ${{ steps.templ.outputs.version }}, the version in go.mod)"
+            exit 1
+          fi
+          untracked="$(git ls-files --others --exclude-standard -- '*_templ.go')"
+          if [ -n "$untracked" ]; then
+            echo "::error::templ generated files that are not committed:"
+            echo "$untracked"
+            exit 1
+          fi

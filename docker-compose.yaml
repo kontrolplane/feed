@@ -1,6 +1,17 @@
+# Self-hosting quickstart, SQLite backend.
+#
+#   docker compose up -d
+#
+# To build from this checkout instead of pulling the published image:
+#
+#   docker compose -f docker-compose.yaml -f docker-compose.build.yaml up -d --build
+
 services:
   feed:
-    build: .
+    # Finding 22: this used to be `build: .`, which forced every self-hoster
+    # through a full Go + templ toolchain build while the release pipeline's
+    # multi-arch images went unused.
+    image: ghcr.io/kontrolplane/feed:latest
     ports:
       - "8080:8080"
     environment:
@@ -10,9 +21,34 @@ services:
       - MARK_READ_ON=open
       - RETENTION=30d
       - DENSITY=default
-      - DEVELOPMENT_SEED=true
+      # DEVELOPMENT_SEED is deliberately absent. It defaults to false in
+      # internal/configuration and injecting the maintainer's default feeds into
+      # a fresh self-hosted install is not a sane default (finding 22).
     volumes:
+      # The image ships /data owned by uid 10001, so docker seeds this empty
+      # named volume with that ownership and the non-root process can write
+      # feed.db, feed.db-wal and feed.db-shm.
       - feed-data:/data
+    # The root filesystem is read-only; /data (the volume) and /tmp (below) are
+    # the only writable paths. modernc.org/sqlite spills to TMPDIR.
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/healthz"]
+      interval: 30s
+      timeout: 3s
+      start_period: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
     restart: unless-stopped
 
 volumes:

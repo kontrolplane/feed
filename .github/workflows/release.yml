@@ -4,6 +4,10 @@ on:
   release:
     types: [published]
 
+# Least privilege by default; each job widens only what it actually needs.
+permissions:
+  contents: read
+
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
@@ -11,6 +15,7 @@ env:
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     permissions:
       contents: read
@@ -20,6 +25,14 @@ jobs:
       - name: checkout
         uses: actions/checkout@v4
 
+      # No docker/setup-qemu-action here, deliberately. The audit flagged that
+      # the linux/arm64 build ran `apk add` in the *target* stage, which needs
+      # binfmt handlers this workflow never registered. The Dockerfile has since
+      # been restructured so the build stage is pinned to $BUILDPLATFORM and
+      # cross-compiles, and the runtime stage contains no RUN at all - the CA
+      # bundle is COPY'd out of the build stage instead of apk-installed. Adding
+      # any RUN to the runtime stage re-breaks arm64 on an amd64 runner; register
+      # QEMU here if that ever becomes necessary.
       - name: set-up-docker-buildx
         uses: docker/setup-buildx-action@v3
 
@@ -35,11 +48,15 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          # `latest` is gated on the release not being a pre-release.
+          # Unconditionally, publishing a pre-release - or re-publishing an old
+          # patch release - silently repointed the tag everyone pulls at a
+          # version that is not the newest stable one.
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
-            type=raw,value=latest
+            type=raw,value=latest,enable=${{ github.event.release.prerelease == false }}
 
       - name: build-and-push
         uses: docker/build-push-action@v6
@@ -47,6 +64,10 @@ jobs:
           context: .
           push: true
           platforms: linux/amd64,linux/arm64
+          # The Dockerfile stamps this into main.version via -ldflags; without
+          # it every published image reports itself as "dev".
+          build-args: |
+            VERSION=${{ github.event.release.tag_name }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
@@ -55,6 +76,14 @@ jobs:
   bump-helm-chart:
     runs-on: ubuntu-latest
     needs: build-and-push
+    timeout-minutes: 10
+
+    # This job never touches *this* repository: it authenticates to
+    # kontrolplane/helm-charts with a GitHub App token and does all its work
+    # there. It therefore needs nothing at all from GITHUB_TOKEN. Without this
+    # block it silently inherited the repository default, which for many repos
+    # is still read/write on every scope.
+    permissions: {}
 
     steps:
       - name: generate-token
