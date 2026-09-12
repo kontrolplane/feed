@@ -1,7 +1,87 @@
 package templates
 
-import "fmt"
+import (
+	"strconv"
+	"strings"
+)
 
+// ── local helpers ────────────────────────────────────────────────
+// These live here rather than in helpers.go because nothing outside
+// the reader needs them, and helpers.go is owned elsewhere.
+
+// readerStripTags removes anything between angle brackets. It is deliberately
+// crude: it is only ever used to *compare* two pieces of text, never to
+// render, so a mis-parse costs us a duplicated lead paragraph and
+// nothing more. It is NOT a sanitiser — see the note on Item.Body below.
+func readerStripTags(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	depth := 0
+	for _, r := range s {
+		switch r {
+		case '<':
+			depth++
+		case '>':
+			if depth > 0 {
+				depth--
+			}
+		default:
+			if depth == 0 {
+				b.WriteRune(r)
+			}
+		}
+	}
+	return b.String()
+}
+
+func readerNormalise(s string) string {
+	return strings.ToLower(strings.Join(strings.Fields(s), " "))
+}
+
+// readerAbstractEchoes reports whether the feed's summary is simply the
+// opening of the extracted article. Most feeds set <description> to the
+// first paragraph, so rendering both makes every article repeat itself
+// before it starts. When they differ the abstract is genuine editorial
+// and worth showing as a lead.
+func readerAbstractEchoes(abstract, body string) bool {
+	if abstract == "" || body == "" {
+		return false
+	}
+	a := strings.Trim(readerNormalise(readerStripTags(abstract)), " .…")
+	if a == "" {
+		return false
+	}
+	return strings.HasPrefix(readerNormalise(readerStripTags(body)), a)
+}
+
+// readerOriginalURL is the article's own address, falling back to the feed's
+// when the item carries no link (some feeds omit <link> on every entry).
+func readerOriginalURL(data ReaderData) string {
+	if data.Item != nil && data.Item.Link != "" {
+		return data.Item.Link
+	}
+	if data.Feed != nil {
+		return data.Feed.URL
+	}
+	return ""
+}
+
+// readerSourceLabel drops the scheme so the byline reads as a source rather
+// than as a URL. It does no truncation on purpose: Truncate/TruncateURL
+// in helpers.go slice by byte, which splits multi-byte runes and emits
+// invalid UTF-8. CSS text-overflow does the same job correctly and
+// adapts to the pane width.
+func readerSourceLabel(u string) string {
+	s := strings.TrimPrefix(u, "https://")
+	s = strings.TrimPrefix(s, "http://")
+	return strings.TrimSuffix(s, "/")
+}
+
+func readerPressed(b bool) string {
+	return strconv.FormatBool(b)
+}
+
+// ── components ───────────────────────────────────────────────────
 templ Reader(data ReaderData) {
 	if data.Item == nil {
 		<section class="reader" id="reader">
@@ -14,127 +94,230 @@ templ Reader(data ReaderData) {
 
 templ readerContent(data ReaderData) {
 	<section class="reader" id="reader">
+		<header class="reader-actions">
+			<div class="ra-side">
+				<!-- only reachable below 960px, where the reader overlays the list -->
+				<button
+					type="button"
+					class="btn-icon reader-back"
+					onclick="showPane('list')"
+					aria-label="back to the item list"
+				>
+					<i class="arw arw-rev" aria-hidden="true"></i>
+				</button>
+				if data.Feed != nil {
+					<span class="eyebrow no-lower ra-feed" title={ data.Feed.Title }>{ data.Feed.Title }</span>
+				}
+			</div>
+			<div class="ra-side ra-end">
+				<button
+					type="button"
+					class="btn-icon reader-toggle"
+					aria-label="star"
+					aria-pressed={ readerPressed(data.Item.Starred) }
+					hx-post={ "/items/" + data.Item.ID + "/star" }
+					hx-target="#reader"
+					hx-swap="outerHTML"
+				>
+					<svg class="ic ic-star" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true">
+						<path d="M12 3l2.7 5.7 6.1.9-4.4 4.4 1.1 6.2-5.5-3-5.5 3 1.1-6.2L3.2 9.6l6.1-.9z"></path>
+					</svg>
+				</button>
+				<button
+					type="button"
+					class="btn-icon reader-toggle"
+					aria-label="read"
+					aria-pressed={ readerPressed(data.Item.Read) }
+					hx-post={ "/items/" + data.Item.ID + "/toggle-read" }
+					hx-target="#reader"
+					hx-swap="outerHTML"
+				>
+					<svg class="ic ic-read" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+						<circle cx="12" cy="12" r="6.5"></circle>
+					</svg>
+				</button>
+				// Re-pull and re-extract this one article. Extraction fails
+				// quietly and often — a paywall, a JS-rendered page, a feed
+				// that only carries summaries — and until now the only
+				// recourse was waiting for a refresh cycle that deliberately
+				// skips items it already has. The spinner state comes from
+				// htmx's own request class, so it cannot desync.
+				<button
+					type="button"
+					class="btn-icon reader-refetch"
+					aria-label="re-fetch this article"
+					title="re-fetch this article"
+					hx-post={ "/items/" + data.Item.ID + "/refetch" }
+					hx-target="#reader"
+					hx-swap="outerHTML"
+					hx-indicator="#progress-bar, .reader-refetch"
+				>
+					<svg class="ic ic-refetch" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true">
+						<path d="M20 12a8 8 0 1 1-2.34-5.66"></path>
+						<polyline points="20 4 20 9 15 9"></polyline>
+					</svg>
+				</button>
+				if readerOriginalURL(data) != "" {
+					<a
+						class="btn btn-sm reader-original"
+						href={ templ.SafeURL(readerOriginalURL(data)) }
+						target="_blank"
+						rel="noopener noreferrer"
+					>
+						@readerIconExternal()
+						<span>open original</span>
+						<span class="visually-hidden">(opens in a new tab)</span>
+					</a>
+				}
+			</div>
+			<!-- scaled by the read-progress custom property, which app.js writes on scroll -->
+			<div class="read-progress" aria-hidden="true"></div>
+		</header>
 		<div class="reader-inner">
-			<div class="actions">
-				<div class="lh">
-					<span>[ reader ]</span>
-					<span style="opacity:0.4">/</span>
-					if data.Feed != nil {
-						<span>{ Truncate(data.Feed.Title, 20) }</span>
+			<div class="reader-head">
+				<dl class="reader-meta">
+					if data.Feed != nil && data.Feed.Title != "" {
+						<div class="rm-pair">
+							<dt>feed</dt>
+							<dd class="no-lower">{ data.Feed.Title }</dd>
+						</div>
 					}
-				</div>
-				<div class="rh">
-					<button
-						class={ templ.KV("on", data.Item.Starred) }
-						hx-post={ "/items/" + data.Item.ID + "/star" }
-						hx-target="#reader"
-						hx-swap="outerHTML"
-					>
-						if data.Item.Starred {
-							★ starred
-						} else {
-							☆ star
-						}
-					</button>
-					<button
-						class={ templ.KV("on", !data.Item.Read) }
-						hx-post={ "/items/" + data.Item.ID + "/toggle-read" }
-						hx-target="#reader"
-						hx-swap="outerHTML"
-					>
-						if data.Item.Read {
-							○ mark unread
-						} else {
-							● mark read
-						}
-					</button>
-					if data.Item.Link != "" {
-						<a href={ templ.SafeURL(data.Item.Link) } target="_blank" rel="noopener">
-							<button>↗ open original</button>
-						</a>
-					} else if data.Feed != nil {
-						<a href={ templ.SafeURL(data.Feed.URL) } target="_blank" rel="noopener">
-							<button>↗ open original</button>
-						</a>
+					if data.Item.Date != "" {
+						<div class="rm-pair">
+							<dt>published</dt>
+							<dd><time datetime={ data.Item.Date }>{ data.Item.Date }</time></dd>
+						</div>
 					}
-				</div>
-			</div>
-			<div class="rmeta">
-				<span>[ { data.Item.Tag } ]</span>
-				<span class="sep">·</span>
-				if data.Feed != nil {
-					<span>{ Truncate(data.Feed.Title, 20) }</span>
+					if data.Item.Minutes > 0 {
+						<div class="rm-pair">
+							<dt>read</dt>
+							<dd class="tnum">{ strconv.Itoa(data.Item.Minutes) } min</dd>
+						</div>
+					}
+					if data.Item.Folder != "" {
+						<div class="rm-pair">
+							<dt>folder</dt>
+							<dd>{ data.Item.Folder }</dd>
+						</div>
+					}
+					if data.Item.Tag != "" {
+						<div class="rm-pair">
+							<dt>tag</dt>
+							<dd>{ data.Item.Tag }</dd>
+						</div>
+					}
+				</dl>
+				<h1 class="reader-title no-lower">{ data.Item.Title }</h1>
+				if data.Item.Authors != "" || data.Feed != nil {
+					<p class="reader-byline">
+						if data.Item.Authors != "" {
+							<span class="no-lower">{ data.Item.Authors }</span>
+						}
+						if data.Feed != nil && data.Feed.URL != "" {
+							<span class="rb-sep" aria-hidden="true"></span>
+							<a
+								class="reader-source no-lower"
+								href={ templ.SafeURL(data.Feed.URL) }
+								target="_blank"
+								rel="noopener noreferrer"
+							>{ readerSourceLabel(data.Feed.URL) }</a>
+						}
+					</p>
 				}
-				<span class="sep">·</span>
-				<span>{ data.Item.Date }</span>
-				<span class="sep">·</span>
-				<span>{ fmt.Sprintf("%d min", data.Item.Minutes) }</span>
-				<span class="sep">·</span>
-				<span>{ data.Item.Folder }</span>
-			</div>
-			<h1>{ data.Item.Title }</h1>
-			<div class="byline">
-				<span>{ data.Item.Authors }</span>
-				if data.Feed != nil {
-					<span class="dim"> &nbsp;/&nbsp; published { data.Item.Date } &nbsp;/&nbsp; fetched via { TruncateURL(data.Feed.URL) }</span>
+				if data.Item.Abstract != "" && !readerAbstractEchoes(data.Item.Abstract, data.Item.Body) {
+					<p class="reader-lead no-lower">{ data.Item.Abstract }</p>
 				}
 			</div>
-			<div class="abs-block">{ data.Item.Abstract }</div>
-			<div class="body">
-				if data.Item.Body != "" {
+			if data.Item.Body != "" {
+				<article class="prose">
 					@templ.Raw(data.Item.Body)
-				} else {
-					@placeholderBody()
-				}
-			</div>
+				</article>
+			} else {
+				@readerNoBody(readerOriginalURL(data))
+			}
 			@readerNav(data.PrevID, data.NextID)
 		</div>
 	</section>
 }
 
+// readerNoBody replaces what used to be placeholderBody(): ~250 words of
+// invented article prose that shipped to real readers whenever the
+// extractor came back empty. Fabricated text presented as the article is
+// worse than no text, so this states the truth and offers the original.
+templ readerNoBody(href string) {
+	<div class="reader-nobody">
+		<div class="empty-state">
+			<div class="es-mark" aria-hidden="true"><i></i><i></i><i></i></div>
+			<p class="es-title">no article text</p>
+			<p class="es-hint">extraction came back empty, or this feed publishes headlines only. the full piece is on the publisher's site.</p>
+			if href != "" {
+				<a class="btn btn-sm" href={ templ.SafeURL(href) } target="_blank" rel="noopener noreferrer">
+					@readerIconExternal()
+					<span>open original</span>
+					<span class="visually-hidden">(opens in a new tab)</span>
+				</a>
+			}
+		</div>
+	</div>
+}
+
 templ readerNav(prevID string, nextID string) {
-	<nav class="reader-nav">
+	<nav class="reader-nav" aria-label="article">
 		if prevID != "" {
 			<a
-				class="reader-nav-btn"
+				class="rn-link rn-prev"
+				href={ templ.SafeURL("/items/" + prevID) }
 				hx-get={ "/items/" + prevID }
 				hx-target="#reader"
 				hx-swap="outerHTML"
-			>← previous</a>
+			>
+				<i class="arw arw-rev" aria-hidden="true"></i>
+				<span>previous</span>
+			</a>
 		} else {
-			<span class="reader-nav-btn disabled">← previous</span>
+			<span class="rn-link rn-prev is-disabled" aria-disabled="true">
+				<i class="arw arw-rev" aria-hidden="true"></i>
+				<span>previous</span>
+			</span>
 		}
 		if nextID != "" {
 			<a
-				class="reader-nav-btn"
+				class="rn-link rn-next"
+				href={ templ.SafeURL("/items/" + nextID) }
 				hx-get={ "/items/" + nextID }
 				hx-target="#reader"
 				hx-swap="outerHTML"
-			>next →</a>
+			>
+				<span>next</span>
+				<i class="arw" aria-hidden="true"></i>
+			</a>
 		} else {
-			<span class="reader-nav-btn disabled">next →</span>
+			<span class="rn-link rn-next is-disabled" aria-disabled="true">
+				<span>next</span>
+				<i class="arw" aria-hidden="true"></i>
+			</span>
 		}
 	</nav>
 }
 
 templ readerEmpty() {
-	<div class="empty">
-		<div class="stagger"><i></i><i></i><i></i></div>
-		<div class="big">pick an item.</div>
-		<div style="font-size:11px;letter-spacing:0.08em;opacity:0.7;margin-top:10px">
-			<span class="inline-kbd">j</span> / <span class="inline-kbd">k</span> navigate ·
-			<span class="inline-kbd">o</span> open ·
-			<span class="inline-kbd">s</span> star
+	<div class="reader-empty">
+		<div class="empty-state">
+			<div class="es-mark" aria-hidden="true"><i></i><i></i><i></i></div>
+			<p class="es-title">pick an item</p>
+			<p class="es-hint re-keys">
+				<span class="re-key"><span class="kbd">j</span> <span class="kbd">k</span> navigate</span>
+				<span class="re-key"><span class="kbd">o</span> open</span>
+				<span class="re-key"><span class="kbd">s</span> star</span>
+			</p>
 		</div>
 	</div>
 }
 
-templ placeholderBody() {
-	<p>the motivation is straightforward. real workloads drift. benchmarks don't. what we measured on a single well-behaved node in 2021 does not describe what the same code does in 2026 when it is scheduled next to seventeen noisy neighbours, none of whom share our assumptions about the page cache.</p>
-	<h2>method</h2>
-	<p>we ran the experiment three ways. the first used the stock configuration as shipped - the one most operators will actually deploy. the second was tuned by hand over several weeks by an engineer who has been working on this subsystem since before it had a name. the third was what the autotuner produced on a cold start.</p>
-	<p>the numbers tell a quieter story than we expected. the hand-tuned configuration wins, as it should. the autotuner comes within 8% on median latency and loses by a wider margin on the long tail. the stock configuration is the surprise: it is not catastrophic. in three of seven regimes it is within noise of hand-tuning.</p>
-	<h2>results</h2>
-	<blockquote>this is uncomfortable. most of the reason teams reach for hand tuning is a story about how much is being left on the table. that story is less true than it used to be. it is still true enough to matter for hot paths and tight budgets, but the shape of the curve has changed.</blockquote>
-	<p>we are publishing the full traces, the configs, and the notebook. if you find a different answer on your hardware we would like to hear about it - especially if you are running something that does not look like the median deployment. the interesting cases live in the corners.</p>
+templ readerIconExternal() {
+	<svg class="ic" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="square" aria-hidden="true">
+		<path d="M14 4h6v6"></path>
+		<path d="M20 4l-9 9"></path>
+		<path d="M18 14.5V19.5H4.5V6h5"></path>
+	</svg>
 }

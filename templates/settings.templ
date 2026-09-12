@@ -2,108 +2,225 @@ package templates
 
 templ Settings(data SettingsData) {
 	<main class="settings-page" id="main">
-		<section class="reader">
-			<div class="reader-inner">
-				<div class="rmeta">
-					<span>[ settings ]</span>
-					<span class="sep">·</span>
-					<span>live</span>
-					<span class="sep">·</span>
-					<span>{ data.DatabaseDriver }</span>
-				</div>
-				<h1>settings.</h1>
-				<div class="byline">no account. no sync. your reading data lives in your { data.DatabaseDriver } database.</div>
-				<div class="settings-grid">
-					<div class="s-cell disabled">
-						<div class="k">[ reading / mark-read-on ]</div>
-						<div class="v">when items become read</div>
-						<div class="opts">
-							<button class={ templ.KV("on", data.MarkReadOn == "scroll") }>scroll</button>
-							<button class={ templ.KV("on", data.MarkReadOn == "open") }>open</button>
-							<button class={ templ.KV("on", data.MarkReadOn == "manual") }>manual</button>
+		<div class="settings-scroll scroll-y">
+			<div class="settings-doc">
+				<header class="settings-head">
+					<p class="eyebrow">settings</p>
+					<h1 class="pane-title">settings.</h1>
+					<p class="pane-lead">
+						no account. no sync. your reading data lives in your <span class="no-lower">{ data.DatabaseDriver }</span> database.
+					</p>
+				</header>
+				<!-- ══ appearance — the only two settings this page can actually change ══ -->
+				<section class="s-section" aria-labelledby="s-appearance-h">
+					<div class="s-section-head">
+						<p class="eyebrow">01 / appearance</p>
+						<h2 class="s-section-title" id="s-appearance-h">appearance</h2>
+					</div>
+					<p class="s-section-note">these two are live. they are stored in this browser only — nothing is sent to the server.</p>
+					<div class="s-controls">
+						<div class="s-control">
+							<span class="s-control-label" id="s-theme-label">colour scheme</span>
+							<div class="seg-control" role="group" aria-labelledby="s-theme-label">
+								<button type="button" data-theme-opt="light" aria-pressed="false">light</button>
+								<button type="button" data-theme-opt="dark" aria-pressed="false">dark</button>
+							</div>
+						</div>
+						<div class="s-control">
+							<span class="s-control-label" id="s-density-label">list row height</span>
+							<div class="seg-control" role="group" aria-labelledby="s-density-label">
+								<button type="button" data-density-opt="tight" aria-pressed="false">tight</button>
+								<button type="button" data-density-opt="default" aria-pressed="false">default</button>
+								<button type="button" data-density-opt="loose" aria-pressed="false">loose</button>
+							</div>
 						</div>
 					</div>
-					<div class="s-cell disabled">
-						<div class="k">[ refresh / cadence ]</div>
-						<div class="v">how often to fetch</div>
-						<div class="opts">
-							<button class={ templ.KV("on", data.RefreshInterval == "5m0s") }>5m</button>
-							<button class={ templ.KV("on", data.RefreshInterval == "15m0s") }>15m</button>
-							<button class={ templ.KV("on", data.RefreshInterval == "1h0m0s") }>1h</button>
-						</div>
+				</section>
+				<!-- ══ server configuration — read-only. every value here is an env var read at boot. ══ -->
+				<section class="s-section" aria-labelledby="s-server-h">
+					<div class="s-section-head">
+						<p class="eyebrow">02 / server configuration</p>
+						<h2 class="s-section-title" id="s-server-h">server configuration</h2>
 					</div>
-					<div class="s-cell disabled">
-						<div class="k">[ retention / history ]</div>
-						<div class="v">keep read items for</div>
-						<div class="opts">
-							<button class={ templ.KV("on", data.Retention == "7d") }>7d</button>
-							<button class={ templ.KV("on", data.Retention == "30d") }>30d</button>
-							<button class={ templ.KV("on", data.Retention == "90d") }>90d</button>
-							<button class={ templ.KV("on", data.Retention == "forever") }>forever</button>
+					<p class="s-section-note">read at boot from the environment. change the variable and restart the process.</p>
+					<dl class="s-defs">
+						<div class="s-def">
+							<dt class="s-def-term">refresh cadence</dt>
+							<dd class="s-def-body">
+								<span class="s-def-value no-lower">{ data.RefreshInterval }</span>
+								<code class="s-def-env no-lower">REFRESH_INTERVAL</code>
+								<span class="s-def-note">how often every feed is re-fetched in the background.</span>
+							</dd>
 						</div>
-					</div>
-					<div class="s-cell disabled">
-						<div class="k">[ display / density ]</div>
-						<div class="v">list row height</div>
-						<div class="opts">
-							<button class={ templ.KV("on", data.Density == "tight") }>tight</button>
-							<button class={ templ.KV("on", data.Density == "default") }>default</button>
-							<button class={ templ.KV("on", data.Density == "loose") }>loose</button>
+						<div class="s-def">
+							<dt class="s-def-term">mark read on</dt>
+							<dd class="s-def-body">
+								<span class="s-def-value no-lower">{ data.MarkReadOn }</span>
+								<code class="s-def-env no-lower">MARK_READ_ON</code>
+								<span class="s-def-note">when an item flips to read — on <code class="no-lower">scroll</code>, on <code class="no-lower">open</code>, or only <code class="no-lower">manual</code>ly.</span>
+							</dd>
 						</div>
-					</div>
-					<div class="s-cell">
-						<div class="k">[ display / theme ]</div>
-						<div class="v">colour scheme</div>
-						<div class="opts" id="theme-opts">
-							<button onclick="setTheme('light')" id="theme-light">light</button>
-							<button onclick="setTheme('dark')" id="theme-dark">dark</button>
+						<div class="s-def">
+							<dt class="s-def-term">retention</dt>
+							<dd class="s-def-body">
+								<span class="s-def-value no-lower">{ data.Retention }</span>
+								<code class="s-def-env no-lower">RETENTION</code>
+								<span class="s-def-note">how long read items are kept before they are pruned.</span>
+							</dd>
 						</div>
-						<script>
-							(function() {
-								var t = localStorage.getItem('theme') || 'light';
-								var el = document.getElementById('theme-' + t);
-								if (el) el.classList.add('on');
-							})();
-						</script>
+						<div class="s-def">
+							<dt class="s-def-term">default density</dt>
+							<dd class="s-def-body">
+								<span class="s-def-value no-lower">{ data.Density }</span>
+								<code class="s-def-env no-lower">DENSITY</code>
+								<span class="s-def-note">the starting row height for a browser that has not picked one. the appearance control above overrides it locally.</span>
+							</dd>
+						</div>
+						<div class="s-def">
+							<dt class="s-def-term">database</dt>
+							<dd class="s-def-body">
+								<span class="s-def-value no-lower">{ data.DatabaseDriver }</span>
+								<code class="s-def-env no-lower">DATABASE_DRIVER</code>
+								<span class="s-def-note">connected to <span class="no-lower">{ data.DatabaseInfo }</span>.</span>
+							</dd>
+						</div>
+					</dl>
+				</section>
+				<!-- ══ build — what to quote in a bug report ══ -->
+				<section class="s-section" aria-labelledby="s-build-h">
+					<div class="s-section-head">
+						<p class="eyebrow">03 / build</p>
+						<h2 class="s-section-title" id="s-build-h">build</h2>
 					</div>
-				</div>
-				<h2 style="font-family:var(--grot);font-size:22px;font-weight:600;letter-spacing:-0.02em;margin-top:48px;margin-bottom:14px">server</h2>
-				<div class="server-info">
-					<div class="srow"><span class="k">binary</span><span>kontrolplane-feed · go</span></div>
-					<div class="srow"><span class="k">router</span><span>net/http.ServeMux</span></div>
-					<div class="srow"><span class="k">templ</span><span>a-h/templ</span></div>
-					<div class="srow"><span class="k">parser</span><span>mmcdole/gofeed</span></div>
-					<div class="srow"><span class="k">db</span><span>{ data.DatabaseDriver } · { data.DatabaseInfo }</span></div>
-					<div class="srow"><span class="k">refresh</span><span>{ data.RefreshInterval }</span></div>
-				</div>
-				<h2 style="font-family:var(--grot);font-size:22px;font-weight:600;letter-spacing:-0.02em;margin-top:48px;margin-bottom:14px">keyboard</h2>
-				<div style="display:grid;grid-template-columns:100px 1fr;row-gap:10px;column-gap:18px;font-family:var(--mono);font-size:12px;padding-top:16px;border-top:1px solid var(--rule-strong)">
-					<div><span class="inline-kbd">j / k</span></div><div style="opacity:0.85">next / previous item</div>
-					<div><span class="inline-kbd">o or ↵</span></div><div style="opacity:0.85">open item in reader</div>
-					<div><span class="inline-kbd">s</span></div><div style="opacity:0.85">toggle star</div>
-					<div><span class="inline-kbd">m</span></div><div style="opacity:0.85">toggle read / unread</div>
-					<div><span class="inline-kbd">/</span></div><div style="opacity:0.85">focus search</div>
-					<div><span class="inline-kbd">n</span></div><div style="opacity:0.85">add new feed</div>
-				</div>
-				<h2 style="font-family:var(--grot);font-size:22px;font-weight:600;letter-spacing:-0.02em;margin-top:48px;margin-bottom:14px">import / export</h2>
-				<div style="display:flex;gap:10px;flex-wrap:wrap;padding-top:16px;border-top:1px solid var(--rule-strong)">
-					<label class="settings-btn">
-						import opml
-						<input
-							type="file"
-							name="file"
-							accept=".opml,.xml"
-							style="display:none"
-							hx-post="/import/opml"
-							hx-encoding="multipart/form-data"
-							hx-trigger="change"
-							hx-swap="none"
-						/>
-					</label>
-					<a class="settings-btn" href="/export/opml" download="feeds.opml">export opml</a>
-				</div>
+					<p class="s-section-note">quote this when you file a bug.</p>
+					<dl class="s-defs s-defs-compact">
+						<div class="s-def">
+							<dt class="s-def-term">binary</dt>
+							<dd class="s-def-body"><span class="s-def-value no-lower">kontrolplane-feed</span><span class="s-def-note">go</span></dd>
+						</div>
+						<div class="s-def">
+							<dt class="s-def-term">router</dt>
+							<dd class="s-def-body"><span class="s-def-value no-lower">net/http.ServeMux</span></dd>
+						</div>
+						<div class="s-def">
+							<dt class="s-def-term">templates</dt>
+							<dd class="s-def-body"><span class="s-def-value no-lower">a-h/templ</span></dd>
+						</div>
+						<div class="s-def">
+							<dt class="s-def-term">parser</dt>
+							<dd class="s-def-body"><span class="s-def-value no-lower">mmcdole/gofeed</span></dd>
+						</div>
+						<div class="s-def">
+							<dt class="s-def-term">front end</dt>
+							<dd class="s-def-body"><span class="s-def-value no-lower">htmx 2</span><span class="s-def-note">no build step.</span></dd>
+						</div>
+					</dl>
+				</section>
+				<!-- ══ keyboard — only the keys app.js actually binds. two tables, split on what the keys act on. ══ -->
+				<section class="s-section" aria-labelledby="s-keys-h">
+					<div class="s-section-head">
+						<p class="eyebrow">04 / keyboard</p>
+						<h2 class="s-section-title" id="s-keys-h">keyboard</h2>
+					</div>
+					<p class="s-section-note">inactive while a text field has focus. modifier combinations are left to the browser.</p>
+					<div class="s-keys-grid">
+						<table class="s-keys">
+							<caption class="s-keys-cap">reading</caption>
+							<thead>
+								<tr>
+									<th scope="col">key</th>
+									<th scope="col">action</th>
+								</tr>
+							</thead>
+							<tbody>
+								<tr>
+									<th scope="row"><kbd class="kbd">j</kbd> <kbd class="kbd">k</kbd></th>
+									<td>next / previous item</td>
+								</tr>
+								<tr>
+									<th scope="row"><kbd class="kbd">o</kbd> <kbd class="kbd">↵</kbd></th>
+									<td>open the selected item in the reader</td>
+								</tr>
+								<tr>
+									<th scope="row"><kbd class="kbd">s</kbd></th>
+									<td>star / unstar the open item</td>
+								</tr>
+								<tr>
+									<th scope="row"><kbd class="kbd">m</kbd></th>
+									<td>mark the open item read / unread</td>
+								</tr>
+								<tr>
+									<th scope="row"><kbd class="kbd">g</kbd> <kbd class="kbd">g</kbd></th>
+									<td>jump to the top of the list</td>
+								</tr>
+							</tbody>
+						</table>
+						<table class="s-keys">
+							<caption class="s-keys-cap">app</caption>
+							<thead>
+								<tr>
+									<th scope="col">key</th>
+									<th scope="col">action</th>
+								</tr>
+							</thead>
+							<tbody>
+								<tr>
+									<th scope="row"><kbd class="kbd">/</kbd></th>
+									<td>focus search</td>
+								</tr>
+								<tr>
+									<th scope="row"><kbd class="kbd">n</kbd></th>
+									<td>add a feed</td>
+								</tr>
+								<tr>
+									<th scope="row"><kbd class="kbd">1</kbd></th>
+									<td>show / hide the sidebar</td>
+								</tr>
+								<tr>
+									<th scope="row"><kbd class="kbd">2</kbd></th>
+									<td>show / hide the item list</td>
+								</tr>
+								<tr>
+									<th scope="row"><kbd class="kbd">esc</kbd></th>
+									<td>close the open dialog, drawer, or leave a text field</td>
+								</tr>
+							</tbody>
+						</table>
+					</div>
+				</section>
+				<!-- ══ data — opml in and out. the only two routes that move feeds in bulk. ══ -->
+				<section class="s-section" aria-labelledby="s-data-h">
+					<div class="s-section-head">
+						<p class="eyebrow">05 / data</p>
+						<h2 class="s-section-title" id="s-data-h">data</h2>
+					</div>
+					<p class="s-section-note">opml is the portable format every reader speaks. export it, take it elsewhere, nothing is locked in here.</p>
+					<div class="s-data-actions">
+						<label class="btn s-file" for="opml-file">
+							import opml
+							<input
+								id="opml-file"
+								class="s-file-input"
+								type="file"
+								name="file"
+								accept=".opml,.xml"
+								hx-post="/import/opml"
+								hx-encoding="multipart/form-data"
+								hx-trigger="change"
+								hx-swap="none"
+								hx-indicator="#progress-bar"
+								hx-on::after-request="var r=document.getElementById('import-result');var ok=event.detail.successful;r.dataset.state=ok?'ok':'err';r.textContent=ok?'import accepted — reloading with your new feeds.':'import failed — that file was not readable opml.';this.value='';"
+							/>
+						</label>
+						<a class="btn" href="/export/opml" download="feeds.opml">
+							export opml
+							<i class="arw"></i>
+						</a>
+					</div>
+					<p class="import-result" id="import-result" role="status" aria-live="polite"></p>
+				</section>
 			</div>
-		</section>
+		</div>
 	</main>
-	<section id="reader" hx-swap-oob="outerHTML" style="display:none"></section>
+	<section id="reader" class="pane-hidden" hx-swap-oob="outerHTML"></section>
 }

@@ -3,82 +3,183 @@ package templates
 templ Layout() {
 	<!doctype html>
 	<html lang="en">
-	<head>
-		<meta charset="utf-8"/>
-		<meta name="viewport" content="width=device-width,initial-scale=1"/>
-		<title>kontrolplane/feed - rss, without the noise</title>
-		<link rel="stylesheet" href="/static/css/styles.css"/>
-		<link rel="icon" href="/static/assets/favicon.ico" type="image/x-icon"/>
-		<script>
-			(function(){var t=localStorage.getItem('theme');if(t==='dark')document.documentElement.setAttribute('data-theme','dark');})();
-			function setTheme(t){localStorage.setItem('theme',t);if(t==='dark'){document.documentElement.setAttribute('data-theme','dark')}else{document.documentElement.removeAttribute('data-theme')}document.querySelectorAll('#theme-opts button').forEach(function(b){b.classList.remove('on')});var el=document.getElementById('theme-'+t);if(el)el.classList.add('on');}
-			function togglePane(pane){
-				var app=document.querySelector('.app');
-				var cls=pane+'-collapsed';
-				app.classList.toggle(cls);
-				localStorage.setItem(pane+'-collapsed',app.classList.contains(cls)?'1':'0');
-			}
-		</script>
-	</head>
-	<body>
-		<div class="app">
-			<header class="topbar">
-				<a class="brand" href="/" onclick="document.querySelector('.app').classList.remove('sidebar-collapsed','list-collapsed');localStorage.removeItem('sidebar-collapsed');localStorage.removeItem('list-collapsed');">
-					<img src="/static/assets/logo.png" alt="" class="brand-logo"/>
-					kontrolplane/feed
-				</a>
-				<div class="search">
-					<span class="prompt">/</span>
-					<input
-						type="search"
-						name="q"
-						placeholder="search items, authors, abstracts…"
-						hx-get="/search"
-						hx-trigger="keyup changed delay:200ms, search"
-						hx-target="#main"
-						hx-swap="outerHTML"
-						hx-indicator="#sync-indicator"
-					/>
-					<kbd>/</kbd>
-				</div>
-				<div class="tools">
-					<button
-						class="btn"
-						hx-get="/folders/new"
-						hx-target="#modal"
-						hx-swap="innerHTML"
-					>＋ folder</button>
-					<button
-						class="btn"
-						hx-get="/feeds/new"
-						hx-target="#modal"
-						hx-swap="innerHTML"
-					>＋ feed</button>
-					<button
-						class="btn"
-						hx-get="/partials/list"
-						hx-target="#main"
-						hx-swap="outerHTML"
-						hx-indicator="#sync-indicator"
-					>
-						<span class="dot"></span>
-						sync · now
-					</button>
-				</div>
-			</header>
-			{ children... }
-		</div>
-		<div id="modal"></div>
-		<script src="https://unpkg.com/htmx.org@2.0.4/dist/htmx.min.js" crossorigin="anonymous"></script>
-		<script src="/static/js/hotkeys.js?v=5"></script>
-		<script>
-			(function(){
-				var app=document.querySelector('.app');
-				['sidebar','list'].forEach(function(p){
-					if(localStorage.getItem(p+'-collapsed')==='1')app.classList.add(p+'-collapsed');
-				});
-			})();
-		</script>
-	</body>
+		<head>
+			<meta charset="utf-8"/>
+			<!-- viewport-fit=cover is what makes env(safe-area-inset-*) resolve to
+			     anything but 0px; without it the status bar sits under the home
+			     indicator on a notched phone and shell.css's insets are inert. -->
+			<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
+			<meta name="color-scheme" content="light dark"/>
+			<meta name="description" content="kontrolplane/feed — a self-hosted rss reader. your reading stays on your own machine."/>
+			<!-- the browser chrome follows the plate: cream stock in light, near-black in dark -->
+			<meta name="theme-color" content="#F4E8C1" media="(prefers-color-scheme: light)"/>
+			<meta name="theme-color" content="#0E1117" media="(prefers-color-scheme: dark)"/>
+			<title>kontrolplane/feed - rss, without the noise</title>
+			<link rel="icon" href="/static/assets/favicon.ico" type="image/x-icon"/>
+			<!--
+				Only the two latin subsets are preloaded. The -ext files are declared
+				in tokens.css with their own unicode-range and load on demand, so
+				preloading them would cost two requests almost nobody needs.
+			-->
+			<link rel="preload" as="font" type="font/woff2" href="/static/fonts/space-grotesk-v22-latin.woff2" crossorigin="anonymous"/>
+			<link rel="preload" as="font" type="font/woff2" href="/static/fonts/jetbrains-mono-v24-latin.woff2" crossorigin="anonymous"/>
+			<!--
+				Separate <link> tags, not @import: imports are discovered only after
+				the parent sheet parses, so they serialise into a request waterfall.
+				The order here is the cascade order — tokens, base, then one file per
+				pane, each of which may only override the layer above it.
+			-->
+			<link rel="stylesheet" href="/static/css/tokens.css"/>
+			<link rel="stylesheet" href="/static/css/base.css"/>
+			<link rel="stylesheet" href="/static/css/shell.css"/>
+			<link rel="stylesheet" href="/static/css/sidebar.css"/>
+			<link rel="stylesheet" href="/static/css/list.css"/>
+			<link rel="stylesheet" href="/static/css/reader.css"/>
+			<link rel="stylesheet" href="/static/css/status.css"/>
+			<link rel="stylesheet" href="/static/css/modal.css"/>
+			<link rel="stylesheet" href="/static/css/manage.css"/>
+			<link rel="stylesheet" href="/static/css/settings.css"/>
+			<!--
+				Must stay inline and synchronous: anything deferred paints the light
+				plate first and then flips, which is the flash this exists to prevent.
+				Everything that is not "decide the plate before first paint" lives in
+				app.js.
+			-->
+			<script>
+				(function(){try{var t=localStorage.getItem('theme');var d=t==='dark'||(!t&&window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches);if(d)document.documentElement.setAttribute('data-theme','dark');}catch(e){}})();
+			</script>
+			<script defer src="/static/js/htmx.min.js"></script>
+			<script defer src="/static/js/app.js"></script>
+		</head>
+		<body>
+			<a class="skip-link" href="#main">skip to content</a>
+			<div class="app" data-pane="list" data-density="default">
+				<!--
+					Second bootstrap, deliberately parked here rather than at the end of
+					<body>: it runs the instant .app exists, so the restored density and
+					the restored pane collapse are in place before the grid is painted.
+					Previously this ran after </div> and the panes visibly snapped shut.
+				-->
+				<script>
+					(function(){try{var a=document.currentScript.parentElement;var d=localStorage.getItem('density');if(d)a.setAttribute('data-density',d);if(localStorage.getItem('sidebar-collapsed')==='1')a.classList.add('sidebar-collapsed');if(localStorage.getItem('list-collapsed')==='1')a.classList.add('list-collapsed');}catch(e){}})();
+				</script>
+				<header class="topbar">
+					<div class="tb-left">
+						<button
+							type="button"
+							id="drawer-toggle"
+							class="btn-icon tb-drawer"
+							data-action="toggle-drawer"
+							aria-controls="sidebar"
+							aria-expanded="false"
+							aria-label="show feeds and folders"
+						>
+							<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.25" aria-hidden="true">
+								<rect x="1.6" y="2.1" width="10.8" height="9.8"></rect>
+								<line x1="5.6" y1="2.1" x2="5.6" y2="11.9"></line>
+							</svg>
+						</button>
+						<a class="brand" href="/">
+							<img class="brand-logo" src="/static/assets/logo.png" alt=""/>
+							<span class="brand-name">kontrolplane/feed</span>
+						</a>
+					</div>
+					<div class="tb-search" role="search">
+						<label class="visually-hidden" for="q">search items, authors and abstracts</label>
+						<svg class="tb-search-icon" width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.25" aria-hidden="true">
+							<circle cx="6.1" cy="6.1" r="4.1"></circle>
+							<line x1="9.2" y1="9.2" x2="12.4" y2="12.4"></line>
+						</svg>
+						<input
+							id="q"
+							class="tb-search-input"
+							type="search"
+							name="q"
+							autocomplete="off"
+							placeholder="search items, authors, abstracts…"
+							hx-get="/search"
+							hx-trigger="keyup changed delay:200ms, search"
+							hx-target="#main"
+							hx-swap="outerHTML"
+							hx-indicator="#progress-bar"
+						/>
+						<button
+							type="button"
+							id="search-clear"
+							class="btn-icon tb-search-clear"
+							data-action="clear-search"
+							aria-label="clear search"
+						>
+							<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.25" aria-hidden="true">
+								<line x1="3.6" y1="3.6" x2="10.4" y2="10.4"></line>
+								<line x1="10.4" y1="3.6" x2="3.6" y2="10.4"></line>
+							</svg>
+						</button>
+						<kbd class="tb-search-kbd" aria-hidden="true">/</kbd>
+					</div>
+					<div class="tb-right">
+						<button
+							type="button"
+							id="sync"
+							class="btn btn-ghost tb-sync"
+							hx-get="/partials/list"
+							hx-target="#main"
+							hx-swap="outerHTML"
+							hx-indicator="#progress-bar, #sync"
+						>
+							<span class="sync-dot" aria-hidden="true"></span>
+							<span class="tb-label">sync</span>
+						</button>
+						<button
+							type="button"
+							id="theme-toggle"
+							class="btn-icon tb-theme"
+							onclick="toggleTheme()"
+							aria-pressed="false"
+						>
+							<span class="tb-theme-light">
+								<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.25" aria-hidden="true">
+									<path d="M11.6 8.9A4.9 4.9 0 0 1 5.1 2.4 4.9 4.9 0 1 0 11.6 8.9Z"></path>
+								</svg>
+								<span class="visually-hidden">use the dark theme</span>
+							</span>
+							<span class="tb-theme-dark">
+								<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.25" aria-hidden="true">
+									<circle cx="7" cy="7" r="2.7"></circle>
+									<line x1="7" y1="0.9" x2="7" y2="2.4"></line>
+									<line x1="7" y1="11.6" x2="7" y2="13.1"></line>
+									<line x1="0.9" y1="7" x2="2.4" y2="7"></line>
+									<line x1="11.6" y1="7" x2="13.1" y2="7"></line>
+									<line x1="2.7" y1="2.7" x2="3.8" y2="3.8"></line>
+									<line x1="10.2" y1="10.2" x2="11.3" y2="11.3"></line>
+									<line x1="2.7" y1="11.3" x2="3.8" y2="10.2"></line>
+									<line x1="10.2" y1="3.8" x2="11.3" y2="2.7"></line>
+								</svg>
+								<span class="visually-hidden">use the light theme</span>
+							</span>
+						</button>
+						<button
+							type="button"
+							class="btn btn-primary tb-new"
+							hx-get="/feeds/new"
+							hx-target="#modal"
+							hx-swap="innerHTML"
+						>
+							<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.25" aria-hidden="true">
+								<line x1="7" y1="2.4" x2="7" y2="11.6"></line>
+								<line x1="2.4" y1="7" x2="11.6" y2="7"></line>
+							</svg>
+							<span class="tb-label">new</span>
+							<span class="visually-hidden">feed</span>
+						</button>
+					</div>
+				</header>
+				{ children... }
+				<div class="drawer-scrim" data-action="close-drawer" aria-hidden="true"></div>
+			</div>
+			<div id="modal"></div>
+			<div id="progress-bar"></div>
+			<div id="announcer" role="status" aria-live="polite" aria-atomic="true"></div>
+		</body>
 	</html>
 }

@@ -2,47 +2,99 @@ package templates
 
 import "github.com/kontrolplane/feed/internal/store"
 import "fmt"
+import "strings"
 
 templ ItemList(data ListData) {
-	<main
-		class="list"
-		id="main"
-		hx-get="/partials/list"
-		hx-trigger="every 900s"
-		hx-swap="outerHTML"
-	>
-		<div class="list-head">
-			<div class="crumb">
-				<span>{ data.Crumb }</span>
-				<span>·</span>
-				<span>{ fmt.Sprintf("%d items", len(data.Items)) }</span>
+	// The 15-minute `hx-trigger="every 900s"` full-pane poll that used to
+	// live on this element is gone: it replaced <main> out from under the
+	// reader, losing scroll position, keyboard selection and any row being
+	// read, with no warning. Refresh is now explicit (topbar sync).
+	<main class="list" id="main" aria-labelledby="list-title">
+		<header class="list-head">
+			<div class="list-head-main">
+				<p class="eyebrow list-crumb">
+					<span class="no-lower">{ listCrumbText(data.Crumb) }</span>
+					<span class="list-dot" aria-hidden="true">·</span>
+					<span class="tnum">{ listCountText(len(data.Items)) }</span>
+				</p>
+				<h1 class="pane-title no-lower" id="list-title">{ data.Title }</h1>
 			</div>
-			<h1>{ data.Title }</h1>
-			<div class="meta">
-				<button
-					class={ templ.KV("on", data.Sort == "newest") }
-					hx-get="/partials/list?sort=newest"
-					hx-target="#main"
-					hx-swap="outerHTML"
-				>newest</button>
-				<button
-					class={ templ.KV("on", data.Sort == "oldest") }
-					hx-get="/partials/list?sort=oldest"
-					hx-target="#main"
-					hx-swap="outerHTML"
-				>oldest</button>
-				<button
-					class={ templ.KV("on", data.Sort == "unread") }
-					hx-get="/partials/list?sort=unread"
-					hx-target="#main"
-					hx-swap="outerHTML"
-				>unread first</button>
+			<div class="list-tools">
+				// One control, not two rows of segmented buttons. Sort is a
+				// setting you change rarely and read often, so it collapses to a
+				// single trigger showing the current order; the three choices
+				// live behind it. <details>/<summary> gives the open/close
+				// state, Escape, and the keyboard semantics natively — picking
+				// an option swaps #main, which replaces this element and closes
+				// the menu with it. Density moved to settings: it is a
+				// preference you set once, not a per-view control.
+				<details class="sort-menu">
+					<summary class="sort-trigger" title="sort order">
+						<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.25" aria-hidden="true" focusable="false">
+							<line x1="2" y1="3.5" x2="9" y2="3.5"></line>
+							<line x1="2" y1="7" x2="7" y2="7"></line>
+							<line x1="2" y1="10.5" x2="5" y2="10.5"></line>
+							<polyline points="10,8.5 12,10.7 14,8.5"></polyline>
+						</svg>
+						<span class="visually-hidden">sort order:</span>
+						<span class="sort-current">{ listSortLabel(data.Sort) }</span>
+					</summary>
+					<div class="sort-pop" role="group" aria-label="sort order">
+						<button
+							type="button"
+							class="sort-opt"
+							aria-pressed={ listBoolAttr(data.Sort == "newest") }
+							hx-get="/partials/list?sort=newest"
+							hx-target="#main"
+							hx-swap="outerHTML"
+						>newest</button>
+						<button
+							type="button"
+							class="sort-opt"
+							aria-pressed={ listBoolAttr(data.Sort == "oldest") }
+							hx-get="/partials/list?sort=oldest"
+							hx-target="#main"
+							hx-swap="outerHTML"
+						>oldest</button>
+						<button
+							type="button"
+							class="sort-opt"
+							aria-pressed={ listBoolAttr(data.Sort == "unread") }
+							hx-get="/partials/list?sort=unread"
+							hx-target="#main"
+							hx-swap="outerHTML"
+						>unread first</button>
+					</div>
+				</details>
 			</div>
-		</div>
-		<div class="list-body" id="list-body">
+		</header>
+		<div class="list-body scroll-y" id="list-body">
 			if len(data.Items) == 0 {
-				<div style="padding:40px 20px;opacity:0.5;font-size:12px">
-					nothing here. try another view.
+				<div class="empty-state list-empty">
+					<div class="es-mark" aria-hidden="true"><i></i><i></i><i></i></div>
+					<p class="es-title">{ listEmptyTitle(data.View) }</p>
+					<p class="es-hint">{ listEmptyHint(data.View) }</p>
+					if listIsFiltered(data.View) {
+						<a
+							class="btn"
+							href="/v/unread"
+							hx-get="/views/unread"
+							hx-target="#main"
+							hx-swap="outerHTML"
+							hx-push-url="/v/unread"
+						>
+							clear filter · back to unread
+							<i class="arw"></i>
+						</a>
+					} else {
+						<button
+							type="button"
+							class="btn btn-primary"
+							hx-get="/feeds/new"
+							hx-target="#modal"
+							hx-swap="innerHTML"
+						>add a feed</button>
+					}
 				</div>
 			}
 			for idx, item := range data.Items {
@@ -52,6 +104,21 @@ templ ItemList(data ListData) {
 	</main>
 }
 
+// listSortLabel is the visible text on the collapsed sort trigger.
+// "unread" is stored as one word but reads as two.
+func listSortLabel(sort string) string {
+	switch sort {
+	case "oldest":
+		return "oldest"
+	case "unread":
+		return "unread first"
+	default:
+		return "newest"
+	}
+}
+
+// &f is a pointer to the range variable, which is per-iteration from
+// Go 1.22 on (go.mod is 1.25), so this is safe as written.
 func feedForItem(item store.Item, feeds []store.Feed) *store.Feed {
 	for _, f := range feeds {
 		if f.ID == item.FeedID {
@@ -61,38 +128,117 @@ func feedForItem(item store.Item, feeds []store.Feed) *store.Feed {
 	return nil
 }
 
+// The crumb arrives from the handler as "[ index / unread ]". The
+// bracket decoration is now carried by the .eyebrow treatment, so it is
+// stripped here; the handler should stop emitting it (see report).
+func listCrumbText(crumb string) string {
+	crumb = strings.TrimSpace(crumb)
+	crumb = strings.TrimPrefix(crumb, "[")
+	crumb = strings.TrimSuffix(crumb, "]")
+	return strings.TrimSpace(crumb)
+}
+
+func listCountText(n int) string {
+	switch n {
+	case 0:
+		return "no items"
+	case 1:
+		return "1 item"
+	default:
+		return fmt.Sprintf("%d items", n)
+	}
+}
+
+func listBoolAttr(b bool) string {
+	return fmt.Sprintf("%t", b)
+}
+
+func listStarLabel(starred bool) string {
+	if starred {
+		return "unstar"
+	}
+	return "star"
+}
+
+// Any view other than "all items" narrows what can appear, so an empty
+// result there means "your filter hid everything", not "you have no
+// feeds" — two different dead ends that need two different exits.
+func listIsFiltered(view ViewState) bool {
+	return !(view.Kind == "view" && view.ID == "all")
+}
+
+func listEmptyTitle(view ViewState) string {
+	if listIsFiltered(view) {
+		return "nothing in this view"
+	}
+	return "no items yet"
+}
+
+func listEmptyHint(view ViewState) string {
+	if listIsFiltered(view) {
+		return "this view or search matched no items. clear it to see everything unread."
+	}
+	return "subscribe to a feed and its articles land here."
+}
+
 templ ItemRow(item store.Item, idx int, feed *store.Feed) {
-	<a
-		class={ "item", templ.KV("unread", !item.Read) }
-		id={ "item-" + item.ID }
-		hx-get={ "/items/" + item.ID }
-		hx-target="#reader"
-		hx-swap="outerHTML"
-	>
-		<div class="n">{ Pad2(idx + 1) }</div>
-		<div class="main">
-			<div class="feed-line">
-				if feed != nil {
-					<span class="feed-path">{ feed.Title } <span class="sep">/</span> { item.Folder }</span>
+	// The id must stay on the OUTERMOST element: the star handler
+	// re-renders ItemRow and swaps it into #item-{id} with outerHTML.
+	<div class={ "item-row", templ.KV("unread", !item.Read), templ.KV("starred", item.Starred) } id={ "item-" + item.ID }>
+		<a
+			class={ "item", templ.KV("unread", !item.Read) }
+			href={ templ.SafeURL("/items/" + item.ID) }
+			hx-get={ "/items/" + item.ID }
+			hx-target="#reader"
+			hx-swap="outerHTML"
+			onclick="showPane('reader')"
+		>
+			<span class="item-rail" aria-hidden="true"></span>
+			<span class="item-main">
+				<span class="item-title no-lower">{ item.Title }</span>
+				<span class="item-meta">
+					if feed != nil {
+						<span class="no-lower">{ feed.Title }</span>
+					}
+					if item.Folder != "" {
+						<span class="list-dot" aria-hidden="true">·</span>
+						<span class="no-lower">{ item.Folder }</span>
+					}
+					if item.Tag != "" {
+						<span class="list-dot" aria-hidden="true">·</span>
+						<span class="item-tag no-lower">{ item.Tag }</span>
+					}
+					if item.Authors != "" {
+						<span class="list-dot" aria-hidden="true">·</span>
+						<span class="no-lower">{ item.Authors }</span>
+					}
+				</span>
+				if item.Abstract != "" {
+					<span class="item-abs no-lower">{ item.Abstract }</span>
 				}
-				<span class="sep">·</span>
-				<span class="tag">{ item.Tag }</span>
-			</div>
-			<h3>{ item.Title }</h3>
-			<div class="authors">{ item.Authors }</div>
-			<div class="abs">{ item.Abstract }</div>
-		</div>
-		<div class="right">
-			<button
-				class={ "star", templ.KV("on", item.Starred) }
-				hx-post={ "/items/" + item.ID + "/star" }
-				hx-target={ "#item-" + item.ID }
-				hx-swap="outerHTML"
-				title="star"
-				onClick="event.stopPropagation(); event.preventDefault();"
-			>★</button>
-			<div>{ FormatDate(item.Date) }</div>
-			<div>{ fmt.Sprintf("%dm", item.Minutes) }</div>
-		</div>
-	</a>
+			</span>
+			<span class="item-right">
+				<time class="item-when tnum" datetime={ item.Date }>{ FormatDate(item.Date) }</time>
+				<span class="item-mins tnum">{ fmt.Sprintf("%dm", item.Minutes) }</span>
+			</span>
+			if !item.Read {
+				<span class="visually-hidden">unread</span>
+			}
+		</a>
+		// A sibling of the anchor, not a child of it: a <button> inside an
+		// <a> is invalid, and the old fix was an inline stopPropagation.
+		<button
+			type="button"
+			class="star"
+			aria-pressed={ listBoolAttr(item.Starred) }
+			aria-label={ listStarLabel(item.Starred) }
+			hx-post={ "/items/" + item.ID + "/star" }
+			hx-target={ "#item-" + item.ID }
+			hx-swap="outerHTML"
+		>
+			<svg class="star-i" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false">
+				<path d="M8 1.7l1.93 3.91 4.32.63-3.13 3.05.74 4.3L8 11.56l-3.86 2.03.74-4.3L1.75 6.24l4.32-.63z"></path>
+			</svg>
+		</button>
+	</div>
 }

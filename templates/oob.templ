@@ -12,6 +12,13 @@ templ OOBReaderReset() {
 	</section>
 }
 
+// The out-of-band twin of Status. It must carry hx-swap="outerHTML" for the
+// same reason Status does, and for a reason Status does not have: htmx strips
+// hx-swap-oob once the swap lands, leaving this footer in the page with its
+// hx-get and its 900s trigger still attached. Without an explicit hx-swap it
+// then falls back to htmx's default of innerHTML, so the next poll nested a
+// complete <footer id="status"> inside the existing one — duplicated content
+// and a second element with the same id, each polling on its own timer.
 templ OOBStatus(data StatusData) {
 	<footer
 		class="status"
@@ -19,6 +26,7 @@ templ OOBStatus(data StatusData) {
 		hx-swap-oob="outerHTML"
 		hx-get="/partials/status"
 		hx-trigger="every 900s"
+		hx-swap="outerHTML"
 	>
 		@statusInner(data)
 	</footer>

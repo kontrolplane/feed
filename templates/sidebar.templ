@@ -1,7 +1,7 @@
 package templates
 
-import "github.com/kontrolplane/feed/internal/store"
 import "fmt"
+import "github.com/kontrolplane/feed/internal/store"
 
 templ Sidebar(data SidebarData) {
 	<aside class="sidebar" id="sidebar">
@@ -10,96 +10,241 @@ templ Sidebar(data SidebarData) {
 }
 
 templ sidebarInner(data SidebarData) {
-	<section>
-		<h5><span>[ views ]</span></h5>
-		@sidebarView("01", "all items", "all", data.Counts.All, data.View)
-		@sidebarView("02", "unread", "unread", data.Counts.Unread, data.View)
-		@sidebarView("03", "read", "read", data.Counts.Read, data.View)
-		@sidebarView("04", "starred", "starred", data.Counts.Starred, data.View)
-	</section>
-	<section>
-		<h5><span>[ timeline ]</span></h5>
-		@sidebarView("01", "today", "today", data.Counts.Today, data.View)
-		@sidebarView("02", "yesterday", "yesterday", data.Counts.Yesterday, data.View)
-		@sidebarView("03", "last week", "last-week", data.Counts.LastWeek, data.View)
-		@sidebarView("04", "last month", "last-month", data.Counts.LastMonth, data.View)
-	</section>
-	<section>
-		<h5>
-			<span>[ folders ]</span>
-			<a
-				class="add"
-				hx-get="/folders/new"
-				hx-target="#modal"
-				hx-swap="innerHTML"
-				title="add folder"
-			>＋</a>
-		</h5>
-		for i, folder := range data.Folders {
-			@sidebarFolder(folder, i, data.Feeds, data.Counts, data.View)
-		}
-	</section>
-	<section>
-		<h5><span>[ system ]</span></h5>
-		<a
-			class={ "nav-item", templ.KV("active", data.View.Kind == "view" && data.View.ID == "manage") }
-			hx-get="/manage"
-			hx-target="#main"
-			hx-swap="outerHTML"
-			hx-push-url="/manage"
-		>
-			<span class="g">✦</span>
-			<span>manage feeds</span>
-			<span class="c">{ fmt.Sprint(len(data.Feeds)) }</span>
-		</a>
-		<a
-			class={ "nav-item", templ.KV("active", data.View.Kind == "view" && data.View.ID == "settings") }
-			hx-get="/settings"
-			hx-target="#main"
-			hx-swap="outerHTML"
-			hx-push-url="/settings"
-		>
-			<span class="g">✦</span>
-			<span>settings</span>
-		</a>
-	</section>
+	<div class="rail">
+		<div class="rail-scroll scroll-y">
+			<nav class="nav-group" aria-label="views">
+				<div class="nav-head"><h2 class="eyebrow">views</h2></div>
+				@sidebarView("all", "all items", "list", data.Counts.All, false, data.View)
+				@sidebarView("unread", "unread", "dot", data.Counts.Unread, true, data.View)
+				@sidebarView("read", "read", "check", data.Counts.Read, false, data.View)
+				@sidebarView("starred", "starred", "star", data.Counts.Starred, false, data.View)
+			</nav>
+			<nav class="nav-group" aria-label="timeline">
+				<div class="nav-head"><h2 class="eyebrow">timeline</h2></div>
+				@sidebarView("today", "today", "clock", data.Counts.Today, false, data.View)
+				@sidebarView("yesterday", "yesterday", "history", data.Counts.Yesterday, false, data.View)
+				@sidebarView("last-week", "last week", "calendar", data.Counts.LastWeek, false, data.View)
+				@sidebarView("last-month", "last month", "archive", data.Counts.LastMonth, false, data.View)
+			</nav>
+			<nav class="nav-group" aria-label="folders">
+				<div class="nav-head">
+					<h2 class="eyebrow">folders</h2>
+					<button
+						class="btn-icon"
+						type="button"
+						aria-label="add folder"
+						hx-get="/folders/new"
+						hx-target="#modal"
+						hx-swap="innerHTML"
+					>
+						@railIcon("plus")
+					</button>
+				</div>
+				if len(data.Folders) == 0 && len(data.Feeds) == 0 {
+					@sidebarEmpty()
+				} else {
+					for _, folder := range data.Folders {
+						@sidebarFolder(folder, data.Feeds, data.Counts, data.View)
+					}
+					@sidebarUnfiled(data.Folders, data.Feeds, data.Counts, data.View)
+				}
+			</nav>
+		</div>
+		<nav class="rail-system" aria-label="system">
+			<div class="nav-head"><h2 class="eyebrow">system</h2></div>
+			@railRow("/manage", "/manage", "sliders", "manage feeds", railCount(len(data.Feeds)), false, data.View.Kind == "view" && data.View.ID == "manage")
+			@railRow("/settings", "/settings", "gear", "settings", "", false, data.View.Kind == "view" && data.View.ID == "settings")
+		</nav>
+	</div>
 }
 
-templ sidebarView(num, label, id string, count int, view ViewState) {
+// one row shape for every destination in the rail. href and hx-push-url are
+// the same url on purpose: htmx cancels the click and swaps #main, but the
+// href is what makes the row focusable, middle-clickable and usable with js off.
+templ railRow(href, get, glyph, label, count string, unread, active bool) {
 	<a
-		class={ "nav-item", templ.KV("active", view.Kind == "view" && view.ID == id) }
-		hx-get={ "/views/" + id }
+		class={ "nav-row", templ.KV("active", active), templ.KV("is-zero", count == "") }
+		href={ templ.SafeURL(href) }
+		hx-get={ get }
 		hx-target="#main"
 		hx-swap="outerHTML"
-		hx-push-url={ "/v/" + id }
+		hx-push-url={ href }
+		{ railCurrent(active)... }
 	>
-		<span class="g">{ num }</span>
-		<span>{ label }</span>
-		<span class="c">{ fmt.Sprint(count) }</span>
+		@railIcon(glyph)
+		<span class="nav-label">{ label }</span>
+		<span class={ "count", templ.KV("count-unread", unread) }>{ count }</span>
 	</a>
 }
 
-templ sidebarFolder(folder store.Folder, idx int, feeds []store.Feed, counts store.Counts, view ViewState) {
-	<div class="folder">
-		<a
-			class={ "nav-item", templ.KV("active", view.Kind == "folder" && view.ID == folder.ID) }
-			hx-get={ "/folders/" + folder.ID }
-			hx-target="#main"
-			hx-swap="outerHTML"
-			hx-push-url={ "/folders/" + folder.ID }
-		>
-			<span class="g">{ Pad2(idx + 1) }</span>
-			<span>{ folder.Label }</span>
-			<span class="c">{ fmt.Sprint(folderUnread(folder.ID, feeds, counts)) }</span>
-		</a>
-		<div class="feeds">
+templ sidebarView(id, label, glyph string, count int, unread bool, view ViewState) {
+	@railRow("/v/"+id, "/views/"+id, glyph, label, railCount(count), unread, view.Kind == "view" && view.ID == id)
+}
+
+// folders collapse with <details>/<summary>, so open/closed costs no
+// javascript and is keyboard- and screen-reader-native. data-folder is the
+// key the behaviour agent persists against; open is the default so a first
+// visit never hides anything.
+templ sidebarFolder(folder store.Folder, feeds []store.Feed, counts store.Counts, view ViewState) {
+	<details class="folder" data-folder={ folder.ID } open>
+		<summary class={ "folder-row", templ.KV("active", view.Kind == "folder" && view.ID == folder.ID) }>
+			@railIcon("chevron")
+			<a
+				class="folder-link"
+				href={ templ.SafeURL("/folders/" + folder.ID) }
+				hx-get={ "/folders/" + folder.ID }
+				hx-target="#main"
+				hx-swap="outerHTML"
+				hx-push-url={ "/folders/" + folder.ID }
+				{ railCurrent(view.Kind == "folder" && view.ID == folder.ID)... }
+			>
+				<span class="no-lower">{ folder.Label }</span>
+			</a>
+			<span class="count count-unread">{ railCount(folderUnread(folder.ID, feeds, counts)) }</span>
+		</summary>
+		<div class="feed-list">
 			for _, feed := range feeds {
 				if feed.Folder == folder.ID {
 					@sidebarFeed(feed, counts, view)
 				}
 			}
 		</div>
+	</details>
+}
+
+// a feed whose folder id no longer resolves to a folder used to vanish from
+// the rail entirely — opml import files every top-level feed under "default"
+// without ever creating that folder. group the strays rather than hide them.
+templ sidebarUnfiled(folders []store.Folder, feeds []store.Feed, counts store.Counts, view ViewState) {
+	if railUnfiledCount(folders, feeds) > 0 {
+		<details class="folder" data-folder="__unfiled__" open>
+			<summary class="folder-row">
+				@railIcon("chevron")
+				<span class="folder-link">unfiled</span>
+				<span class="count count-unread">{ railCount(railUnfiledUnread(folders, feeds, counts)) }</span>
+			</summary>
+			<div class="feed-list">
+				for _, feed := range feeds {
+					if !railFolderExists(folders, feed.Folder) {
+						@sidebarFeed(feed, counts, view)
+					}
+				}
+			</div>
+		</details>
+	}
+}
+
+templ sidebarFeed(feed store.Feed, counts store.Counts, view ViewState) {
+	<a
+		class={ "feed-row", templ.KV("active", view.Kind == "feed" && view.ID == feed.ID) }
+		href={ templ.SafeURL("/feeds/" + feed.ID) }
+		hx-get={ "/feeds/" + feed.ID }
+		hx-target="#main"
+		hx-swap="outerHTML"
+		hx-push-url={ "/feeds/" + feed.ID }
+		title={ feed.Title }
+		{ railCurrent(view.Kind == "feed" && view.ID == feed.ID)... }
+	>
+		<span class="feed-title no-lower">{ feed.Title }</span>
+		<span class="count count-unread">{ railCount(counts.PerFeed[feed.ID]) }</span>
+	</a>
+}
+
+templ sidebarEmpty() {
+	<div class="empty-state rail-empty">
+		<div class="es-mark"><i></i><i></i><i></i></div>
+		<p class="es-title">no feeds yet</p>
+		<p class="es-hint">subscribe to something and it shows up here, grouped by folder.</p>
+		<button
+			class="btn btn-sm"
+			type="button"
+			hx-get="/feeds/new"
+			hx-target="#modal"
+			hx-swap="innerHTML"
+		>
+			@railIcon("plus")
+			add your first feed
+		</button>
 	</div>
+}
+
+// 14px line glyphs, drawn in currentColor so they invert with the row on the
+// navy plate. decorative only — every row is named by its text label.
+templ railIcon(name string) {
+	switch name {
+		case "list":
+			<svg class="rail-ic" viewBox="0 0 14 14" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+				<path d="M2 4h10M2 7h10M2 10h7"></path>
+			</svg>
+		case "dot":
+			<svg class="rail-ic" viewBox="0 0 14 14" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+				<circle cx="7" cy="7" r="3"></circle>
+			</svg>
+		case "check":
+			<svg class="rail-ic" viewBox="0 0 14 14" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+				<path d="M2.4 7.3l3 3 6.2-6.6"></path>
+			</svg>
+		case "star":
+			<svg class="rail-ic" viewBox="0 0 14 14" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+				<path d="M7 2l1.55 3.15 3.45.5-2.5 2.44.6 3.45L7 9.92 3.9 11.54l.6-3.45L2 5.65l3.45-.5z"></path>
+			</svg>
+		case "clock":
+			<svg class="rail-ic" viewBox="0 0 14 14" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+				<circle cx="7" cy="7" r="5"></circle>
+				<path d="M7 4.2V7l1.9 1.2"></path>
+			</svg>
+		case "history":
+			<svg class="rail-ic" viewBox="0 0 14 14" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+				<path d="M2.2 7a4.9 4.9 0 1 0 1.5-3.5"></path>
+				<path d="M1.7 2.4v2.6h2.6"></path>
+				<path d="M7 4.4V7l1.9 1.2"></path>
+			</svg>
+		case "calendar":
+			<svg class="rail-ic" viewBox="0 0 14 14" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+				<rect x="2" y="3" width="10" height="9"></rect>
+				<path d="M2 5.8h10M4.6 1.8v2.2M9.4 1.8v2.2"></path>
+			</svg>
+		case "archive":
+			<svg class="rail-ic" viewBox="0 0 14 14" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+				<rect x="1.8" y="2.4" width="10.4" height="2.8"></rect>
+				<path d="M2.8 5.2v6.4h8.4V5.2M5.6 7.8h2.8"></path>
+			</svg>
+		case "sliders":
+			<svg class="rail-ic" viewBox="0 0 14 14" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+				<path d="M2 4.4h10M2 9.6h10"></path>
+				<circle cx="5" cy="4.4" r="1.5"></circle>
+				<circle cx="9" cy="9.6" r="1.5"></circle>
+			</svg>
+		case "gear":
+			<svg class="rail-ic" viewBox="0 0 14 14" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+				<circle cx="7" cy="7" r="2.1"></circle>
+				<path d="M7 1.6v1.5M7 10.9v1.5M1.6 7h1.5M10.9 7h1.5M3.2 3.2l1.1 1.1M9.7 9.7l1.1 1.1M10.8 3.2L9.7 4.3M4.3 9.7l-1.1 1.1"></path>
+			</svg>
+		case "chevron":
+			<svg class="rail-ic rail-chev" viewBox="0 0 14 14" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+				<path d="M5.2 3l3.6 4-3.6 4"></path>
+			</svg>
+		case "plus":
+			<svg class="rail-ic" viewBox="0 0 14 14" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+				<path d="M7 2.6v8.8M2.6 7h8.8"></path>
+			</svg>
+	}
+}
+
+// an empty count column beats a literal "-": zero unread is nothing to read,
+// not a value to line up next to real numbers.
+func railCount(n int) string {
+	if n == 0 {
+		return ""
+	}
+	return fmt.Sprint(n)
+}
+
+func railCurrent(active bool) templ.Attributes {
+	if active {
+		return templ.Attributes{"aria-current": "page"}
+	}
+	return templ.Attributes{}
 }
 
 func folderUnread(folderID string, feeds []store.Feed, counts store.Counts) int {
@@ -112,19 +257,31 @@ func folderUnread(folderID string, feeds []store.Feed, counts store.Counts) int 
 	return total
 }
 
-templ sidebarFeed(feed store.Feed, counts store.Counts, view ViewState) {
-	<a
-		class={ "feed-item", templ.KV("active", view.Kind == "feed" && view.ID == feed.ID), templ.KV("unread", counts.PerFeed[feed.ID] > 0) }
-		hx-get={ "/feeds/" + feed.ID }
-		hx-target="#main"
-		hx-swap="outerHTML"
-		hx-push-url={ "/feeds/" + feed.ID }
-	>
-		<span class="t">{ feed.Title }</span>
-		if counts.PerFeed[feed.ID] > 0 {
-			<span class="c">{ fmt.Sprint(counts.PerFeed[feed.ID]) }</span>
-		} else {
-			<span class="c">-</span>
+func railFolderExists(folders []store.Folder, id string) bool {
+	for _, f := range folders {
+		if f.ID == id {
+			return true
 		}
-	</a>
+	}
+	return false
+}
+
+func railUnfiledCount(folders []store.Folder, feeds []store.Feed) int {
+	n := 0
+	for _, f := range feeds {
+		if !railFolderExists(folders, f.Folder) {
+			n++
+		}
+	}
+	return n
+}
+
+func railUnfiledUnread(folders []store.Folder, feeds []store.Feed, counts store.Counts) int {
+	total := 0
+	for _, f := range feeds {
+		if !railFolderExists(folders, f.Folder) {
+			total += counts.PerFeed[f.ID]
+		}
+	}
+	return total
 }

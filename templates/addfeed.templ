@@ -2,66 +2,125 @@ package templates
 
 import "github.com/kontrolplane/feed/internal/store"
 
+// AddFeedModal renders a native <dialog>. app.js calls showModal() on
+// any <dialog class="modal"> htmx swaps into #modal, so the focus trap,
+// Escape, the top layer, the backdrop and inert-ing the page behind all
+// come from the platform rather than from the hand-rolled scrim this
+// replaces.
+//
+// #probe-results starts out holding the form's own buttons, so probing
+// swaps the "probe" action out and the "subscribe" action in — one
+// place on screen for "what happens next".
 templ AddFeedModal(folders []store.Folder) {
-	<div class="scrim" onclick="document.getElementById('modal').innerHTML=''">
-		<div class="modal" onclick="event.stopPropagation()">
-			<div class="modal-head">
-				<span>[ subscribe / add feed ]</span>
-				<span class="close" onclick="document.getElementById('modal').innerHTML=''">✕</span>
-			</div>
-			<div class="modal-body">
-				<h2>add a source.</h2>
-				<div class="sub">paste a site url or a direct rss / atom link. gofeed will probe.</div>
-				<form hx-post="/feeds/probe" hx-target="#probe-results" hx-swap="innerHTML">
-					<label>source url</label>
+	<dialog id="add-feed-modal" class="modal" aria-labelledby="add-feed-title">
+		<header class="modal-head">
+			<span class="eyebrow">subscribe / add feed</span>
+			// wrapped in method="dialog" so the close control still works
+			// if app.js has not loaded yet; data-close-modal is what app.js
+			// binds, and closing an already-closed dialog is a no-op.
+			<form method="dialog" class="modal-close-form">
+				<button type="submit" class="btn-icon" aria-label="close" data-close-modal>
+					<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true" focusable="false">
+						<path d="M2 2 L12 12 M12 2 L2 12"></path>
+					</svg>
+				</button>
+			</form>
+		</header>
+		<div class="modal-body scroll-y">
+			<h2 id="add-feed-title" class="modal-title">add a source.</h2>
+			<p class="pane-lead modal-lead">the address of an rss or atom feed. a site url works too if you already know it carries one.</p>
+			<form
+				class="modal-form"
+				hx-post="/feeds/probe"
+				hx-target="#probe-results"
+				hx-swap="innerHTML"
+				hx-indicator="#probe-indicator"
+				hx-disabled-elt="find button[type='submit']"
+			>
+				<div class="modal-field">
+					<label class="field-label" for="add-feed-url">source url</label>
 					<input
+						id="add-feed-url"
+						class="field no-lower"
 						type="url"
 						name="url"
-						placeholder="https://example.com  or  https://example.com/feed.xml"
+						inputmode="url"
+						autocomplete="off"
+						spellcheck="false"
+						placeholder="https://example.com/feed.xml"
 						required
+						autofocus
 					/>
-					<div id="probe-results">
-						<div class="btns">
-							<button type="button" class="ghost" onclick="document.getElementById('modal').innerHTML=''">cancel</button>
-							<button type="submit" class="primary">probe →</button>
-						</div>
+				</div>
+				<div id="probe-results">
+					<div class="modal-actions">
+						<button type="button" class="btn btn-ghost" data-close-modal>cancel</button>
+						<button type="submit" class="btn btn-primary">
+							continue
+							// the request crosses the network; without this the
+							// button just sat there looking frozen
+							<span id="probe-indicator" class="htmx-indicator probe-spinner" aria-hidden="true"></span>
+						</button>
 					</div>
-				</form>
-			</div>
+				</div>
+			</form>
 		</div>
-	</div>
+	</dialog>
 }
 
+// ProbeResults is deliberately modest about what it claims. POST
+// /feeds/probe (handler.go handleProbe) parses the form, reads "url",
+// loads the folder list and renders — it makes no network request and
+// parses no feed. The previous markup invented a "discovered feeds"
+// table with one hardcoded row called "main feed" and a hardcoded
+// status of "ok", which told the user their url had been validated when
+// nothing had looked at it. What is actually true at this point is only
+// that the url will be stored as a feed, so that is all this says.
 templ ProbeResults(url string, folders []store.Folder) {
-	<label style="margin-top:20px">discovered feeds</label>
-	<div class="discovered">
-		<div class="drow">
-			<input type="checkbox" name="feed_url" value={ url } checked/>
-			<div>
-				<div style="font-weight:600">main feed</div>
-				<div class="dim">{ url } · [ rss/atom ]</div>
-			</div>
-			<div class="dim">ok</div>
-		</div>
+	<div class="probe-note">
+		<span class="eyebrow probe-note-label">this url will be added as a feed</span>
+		<span class="probe-note-url no-lower">{ url }</span>
+		<span class="probe-note-hint">nothing has fetched it yet — it is read for the first time on the next refresh, and shows up empty until then.</span>
 	</div>
-	<label>name</label>
-	<input
-		type="text"
-		name="title"
-		value={ url }
-		placeholder="feed name"
-	/>
-	<label>place in folder</label>
-	@FolderPicker(folders, "")
-	<div class="btns" style="margin-top:22px;padding-top:18px;border-top:1px solid var(--rule)">
-		<button type="button" class="ghost" onclick="document.getElementById('modal').innerHTML=''">cancel</button>
+	// handleSubscribe reads feed_url. It used to come from a checkbox
+	// the user could untick, in which case subscribing did nothing at
+	// all and reported success. There is exactly one url here, so it is
+	// a hidden field.
+	<input type="hidden" name="feed_url" value={ url }/>
+	<div class="modal-field">
+		<label class="field-label" for="subscribe-title">name</label>
+		// left empty on purpose: handleSubscribe falls back to the url,
+		// which is the same result the old prefilled-with-the-raw-url
+		// field gave, without making the user clear it first.
+		<input
+			id="subscribe-title"
+			class="field no-lower"
+			type="text"
+			name="title"
+			placeholder="optional — defaults to the url"
+			autocomplete="off"
+		/>
+	</div>
+	<div class="modal-field">
+		@FolderPicker(folders, "")
+	</div>
+	<p class="modal-error" role="alert" data-modal-error hidden>could not subscribe. the server rejected the request.</p>
+	<div class="modal-actions modal-actions-ruled">
+		<button type="button" class="btn btn-ghost" data-close-modal>cancel</button>
+		// the old version wrapped a setTimeout(..., 200) that cleared
+		// #modal whether or not the post succeeded, so a failed subscribe
+		// vanished without a word.
 		<button
-			class="primary"
+			type="button"
+			class="btn btn-primary"
 			hx-post="/feeds/subscribe"
 			hx-include="closest form"
 			hx-target="#sidebar"
 			hx-swap="outerHTML"
-			onclick="setTimeout(function(){ document.getElementById('modal').innerHTML=''; }, 200)"
-		>subscribe →</button>
+			hx-disabled-elt="this"
+			hx-on::after-request="if(event.detail.successful){this.closest('dialog').close()}else{this.closest('form').querySelector('[data-modal-error]').hidden=false}"
+		>
+			subscribe <i class="arw"></i>
+		</button>
 	</div>
 }

@@ -21,9 +21,9 @@ type FeedServiceConfiguration struct {
 	DatabaseSslMode  string `env:"DATABASE_SSL_MODE" envDefault:"disable"`
 
 	// Reading behaviour
-	MarkReadOn string `env:"MARK_READ_ON" envDefault:"open"`    // "scroll", "open", "manual"
-	Retention  string `env:"RETENTION" envDefault:"30d"`         // "7d", "30d", "90d", "forever"
-	Density    string `env:"DENSITY" envDefault:"default"`       // "tight", "default", "loose"
+	MarkReadOn string `env:"MARK_READ_ON" envDefault:"open"` // "scroll", "open", "manual"
+	Retention  string `env:"RETENTION" envDefault:"30d"`     // "7d", "30d", "90d", "forever"
+	Density    string `env:"DENSITY" envDefault:"default"`   // "tight", "default", "loose"
 
 	// Path to an OPML file to import feeds from on startup
 	FeedsFile string `env:"FEEDS_FILE" envDefault:""`

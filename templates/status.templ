@@ -15,26 +15,45 @@ templ Status(data StatusData) {
 }
 
 templ statusInner(data StatusData) {
-	<div class="seg">
-		<span class="k">[ view ]</span>
-		<span>{ data.ViewTitle }</span>
+	<div class="st-live" role="status" aria-live="polite" aria-atomic="false">
+		<span class="st-seg st-view no-lower" title={ data.ViewTitle }>{ data.ViewTitle }</span>
+		<span class="st-seg st-items">
+			<span class="visually-hidden">items</span>
+			<span class="tnum">{ fmt.Sprint(data.FilteredLen) }</span>
+			<span class="st-of" aria-hidden="true">/</span>
+			<span class="visually-hidden">of</span>
+			<span class="tnum">{ fmt.Sprint(data.TotalLen) }</span>
+		</span>
+		if data.UnreadCount > 0 {
+			<span class="st-seg st-unread has-unread">
+				<i class="st-dot st-dot-unread" aria-hidden="true"></i>
+				<span class="tnum">{ fmt.Sprint(data.UnreadCount) }</span>
+				<span>unread</span>
+			</span>
+		} else {
+			<span class="st-seg st-unread">
+				<span class="tnum">0</span>
+				<span>unread</span>
+			</span>
+		}
+		<span class="st-seg st-feeds">
+			<span class="tnum">{ fmt.Sprint(data.FeedCount) }</span>
+			<span>feeds</span>
+		</span>
 	</div>
-	<div class="seg">
-		<span class="k">[ items ]</span>
-		<span>{ fmt.Sprintf("%d / %d", data.FilteredLen, data.TotalLen) }</span>
-	</div>
-	<div class="seg">
-		<span class="k">[ unread ]</span>
-		<span>{ fmt.Sprint(data.UnreadCount) }</span>
-	</div>
-	<div class="right">
-		<span><kbd>j</kbd><kbd>k</kbd> navigate</span>
-		<span><kbd>o</kbd> open</span>
-		<span><kbd>s</kbd> star</span>
-		<span><kbd>/</kbd> search</span>
-		<span><kbd>1</kbd> sidebar</span>
-		<span><kbd>2</kbd> list</span>
-		<span>·</span>
-		<span>{ fmt.Sprintf("%d feeds · %s", data.FeedCount, data.LastSync) }</span>
+	<div class="st-sync">
+		<span class="st-sync-state">
+			<i class="st-dot st-dot-live" aria-hidden="true"></i>
+			<time class="st-time" title={ data.LastSync }>{ data.LastSync }</time>
+		</span>
+		<a
+			class="btn-icon st-help"
+			href="/settings"
+			aria-label="keyboard shortcuts"
+			hx-get="/settings"
+			hx-target="#main"
+			hx-swap="outerHTML"
+			hx-push-url="/settings"
+		>?</a>
 	</div>
 }

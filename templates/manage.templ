@@ -3,166 +3,498 @@ package templates
 import "github.com/kontrolplane/feed/internal/store"
 import "fmt"
 
-templ Manage(data ManageData) {
-	<main class="manage-page" id="main">
-		<section class="reader">
-			<div class="reader-inner">
-				<div class="rmeta">
-					<span>[ system / manage ]</span>
-					<span class="sep">·</span>
-					<span>{ fmt.Sprintf("%d feeds", len(data.Feeds)) }</span>
-				</div>
-				<h1>manage feeds.</h1>
-				<div class="byline">add, rename, or remove your subscriptions.</div>
-				<div class="manage-actions">
-					<button
-						class="manage-add"
-						hx-get="/feeds/new"
-						hx-target="#modal"
-						hx-swap="innerHTML"
-					>＋ add feed</button>
-					<button
-						class="manage-add"
-						hx-get="/folders/new"
-						hx-target="#modal"
-						hx-swap="innerHTML"
-					>＋ add folder</button>
-				</div>
-				for _, folder := range data.Folders {
-					@manageFolder(folder, data.Feeds)
-				}
-			</div>
-		</section>
-	</main>
-	<section id="reader" hx-swap-oob="outerHTML" style="display:none"></section>
+// manageUnfiledKey is the data-folder value used by the "unfiled" bucket.
+// It cannot collide with a real folder id because ids come from the store
+// and this one is not a legal one there.
+const manageUnfiledKey = "__unfiled__"
+
+// manageGroup is one block of the table: a folder head row followed by its
+// feed rows. Building the whole grouping once, up front, fixes a real bug
+// in the previous version — it looped over data.Folders and printed the
+// feeds whose Folder matched, so any feed pointing at a folder that had
+// since been deleted rendered NOWHERE. It was in the database, it was
+// counted in "42 feeds", and there was no way to reach it from this page
+// to edit or remove it. Those feeds are now collected into a trailing
+// unfiled group, which is the only screen in the app that can rescue them.
+type manageGroup struct {
+	Key       string // the data-folder value the filter/sort script reads
+	DOMID     string // htmx swap target for the folder confirm state
+	Label     string
+	Feeds     []store.Feed
+	Removable bool // the default folder is not removable
+	Unfiled   bool
 }
 
-templ manageFolder(folder store.Folder, feeds []store.Feed) {
-	<div class="manage-folder" id={ "manage-folder-" + folder.ID }>
-		<div class="manage-folder-head">
-			<span>[ { folder.Label } ]</span>
-			if folder.ID != "default" {
+// manageGroups buckets every feed exactly once. A feed is either in a
+// folder that exists, or it is unfiled — there is no third case, and no
+// feed can be dropped.
+func manageGroups(data ManageData) []manageGroup {
+	at := make(map[string]int, len(data.Folders))
+	groups := make([]manageGroup, 0, len(data.Folders)+1)
+	for _, folder := range data.Folders {
+		at[folder.ID] = len(groups)
+		groups = append(groups, manageGroup{
+			Key:       folder.ID,
+			DOMID:     "manage-folder-" + folder.ID,
+			Label:     folder.Label,
+			Removable: folder.ID != "default",
+		})
+	}
+
+	orphans := make([]store.Feed, 0)
+	for _, feed := range data.Feeds {
+		if i, ok := at[feed.Folder]; ok {
+			groups[i].Feeds = append(groups[i].Feeds, feed)
+			continue
+		}
+		orphans = append(orphans, feed)
+	}
+	if len(orphans) > 0 {
+		groups = append(groups, manageGroup{
+			Key:     manageUnfiledKey,
+			DOMID:   "manage-unfiled",
+			Label:   "unfiled",
+			Feeds:   orphans,
+			Unfiled: true,
+		})
+	}
+	return groups
+}
+
+// manageFolderLabel resolves a feed's folder id to the label shown in the
+// folder column. The edit and confirm fragments are rendered on their own,
+// without the grouping, so they resolve it here — and a feed whose folder
+// is gone reads "unfiled" there too rather than printing a dangling id.
+func manageFolderLabel(folders []store.Folder, id string) string {
+	for _, folder := range folders {
+		if folder.ID == id {
+			return folder.Label
+		}
+	}
+	return "unfiled"
+}
+
+// manageNoun keeps the counts honest: "1 feed", not "1 feeds".
+func manageNoun(n int, singular, plural string) string {
+	if n == 1 {
+		return singular
+	}
+	return plural
+}
+
+func manageCount(n int, singular, plural string) string {
+	return fmt.Sprintf("%d %s", n, manageNoun(n, singular, plural))
+}
+
+templ Manage(data ManageData) {
+	{{ groups := manageGroups(data) }}
+	<main class="manage-page" id="main">
+		<div class="manage-scroll scroll-y">
+			<div class="manage-doc">
+				<header class="manage-head">
+					<p class="eyebrow">system / manage</p>
+					<h1 class="pane-title">manage feeds.</h1>
+					<p class="pane-lead">add, rename, move or remove your subscriptions. every change here is local — nothing leaves this machine.</p>
+				</header>
+				<div class="manage-bar">
+					if len(data.Feeds) > 0 {
+						<div class="manage-bar-filter">
+							<label class="field-label" for="manage-filter">filter</label>
+							<div class="manage-filter">
+								<input
+									id="manage-filter"
+									class="field manage-filter-input"
+									type="search"
+									placeholder="name, url or folder"
+									autocomplete="off"
+									spellcheck="false"
+								/>
+								<button type="button" class="btn-icon manage-filter-clear" aria-label="clear filter">
+									@manageCross()
+								</button>
+							</div>
+						</div>
+						<div class="manage-bar-sort">
+							<span class="field-label" id="manage-sort-label">order</span>
+							<div class="seg-control" role="group" aria-labelledby="manage-sort-label">
+								<button type="button" data-manage-sort="folder" aria-pressed="true">by folder</button>
+								<button type="button" data-manage-sort="title" aria-pressed="false">a–z</button>
+							</div>
+						</div>
+					}
+					<div class="manage-bar-actions">
+						<button
+							type="button"
+							class="btn btn-primary"
+							hx-get="/feeds/new"
+							hx-target="#modal"
+							hx-swap="innerHTML"
+						>
+							@managePlus()
+							add feed
+						</button>
+						<button
+							type="button"
+							class="btn"
+							hx-get="/folders/new"
+							hx-target="#modal"
+							hx-swap="innerHTML"
+						>
+							@managePlus()
+							add folder
+						</button>
+					</div>
+				</div>
+				if len(data.Feeds) == 0 {
+					<div class="empty-state manage-empty">
+						<div class="es-mark" aria-hidden="true"><i></i><i></i><i></i></div>
+						<p class="es-title">no feeds yet</p>
+						<p class="es-hint">subscribe to something and it will appear here, grouped by folder. an opml file can be imported from settings.</p>
+						<button
+							type="button"
+							class="btn btn-primary"
+							hx-get="/feeds/new"
+							hx-target="#modal"
+							hx-swap="innerHTML"
+						>
+							@managePlus()
+							add your first feed
+						</button>
+					</div>
+				} else {
+					// the folder count is the real folders only — the unfiled
+					// group is a rescue bucket, not a folder anyone made.
+					<p class="manage-count tnum" aria-live="polite">
+						{ manageCount(len(data.Feeds), "feed", "feeds") } in { manageCount(len(data.Folders), "folder", "folders") }
+					</p>
+					@manageTable(groups)
+				}
+			</div>
+		</div>
+		<!--
+			Page-local behaviour: the filter box, the order control and the
+			clear button. It is an external file rather than an inline
+			<script> because script-src in internal/handler/middleware.go is
+			'self' plus five pinned hashes — an inline block here would be
+			refused by the browser and the filter would silently do nothing.
+		-->
+		<script src="/static/js/manage.js" defer></script>
+	</main>
+	<section id="reader" class="manage-reader-off" hx-swap-oob="outerHTML"></section>
+}
+
+// a 14x14 hairline cross, drawn rather than typed. the page used the
+// fullwidth '＋' glyph, which falls back to a different face on most
+// systems and sits off the mono baseline when it does.
+templ managePlus() {
+	<svg class="manage-plus" width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.25" aria-hidden="true" focusable="false">
+		<path d="M7 2.25v9.5"></path>
+		<path d="M2.25 7h9.5"></path>
+	</svg>
+}
+
+// the same cross rotated — used only by the filter's clear button, which
+// carries its own aria-label because it has no text.
+templ manageCross() {
+	<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.25" aria-hidden="true" focusable="false">
+		<path d="M2.5 2.5l7 7"></path>
+		<path d="M9.5 2.5l-7 7"></path>
+	</svg>
+}
+
+// THE TABLE, AND WHY IT IS A TABLE
+// Subscriptions are records with four fields each, read by comparison —
+// "which of these is the one pointing at the wrong url", "what is in
+// this folder", "do I still want that". A grid of cards answers none of
+// those: the fields land at different x positions in every card, so the
+// eye cannot run down a column, and each card spends ~256px of height on
+// one record. A table puts every title on the same left edge, every url
+// under the last one, and fits sixty feeds in the height eight cards
+// used to take. It is also the only primitive here that can carry real
+// column headers, which is what makes it readable with a screen reader.
+templ manageTable(groups []manageGroup) {
+	<table class="manage-table" role="table" data-sort="folder">
+		<caption class="visually-hidden">your subscriptions, grouped by folder</caption>
+		<thead role="rowgroup">
+			<tr role="row">
+				<th class="mt-feed" role="columnheader" scope="col">feed</th>
+				<th class="mt-url" role="columnheader" scope="col">url</th>
+				<th class="mt-folder" role="columnheader" scope="col">folder</th>
+				<th class="mt-act" role="columnheader" scope="col"><span class="visually-hidden">actions</span></th>
+			</tr>
+		</thead>
+		<tbody role="rowgroup">
+			for _, group := range groups {
+				@manageGroupRow(group)
+				for _, feed := range group.Feeds {
+					@manageFeedRow(feed, group)
+				}
+				if len(group.Feeds) == 0 {
+					@manageEmptyRow(group)
+				}
+			}
+			// revealed by manage.js when a filter matches nothing. a table
+			// that just empties itself looks broken.
+			<tr class="manage-nomatch" role="row" data-row="nomatch" hidden?={ true }>
+				<td role="cell" colspan="4">
+					<div class="manage-nomatch-inner">no feed matches that filter.</div>
+				</td>
+			</tr>
+		</tbody>
+	</table>
+}
+
+templ manageGroupRow(group manageGroup) {
+	<tr
+		class="manage-group"
+		role="row"
+		id={ group.DOMID }
+		data-row="group"
+		data-folder={ group.Key }
+	>
+		<td class="manage-group-cell" role="cell" colspan="4">
+			<div class="manage-group-inner">
+				<h2 class="manage-group-name no-lower">{ group.Label }</h2>
+				<span class="manage-group-count tnum">{ manageCount(len(group.Feeds), "feed", "feeds") }</span>
+				if group.Unfiled {
+					<span class="manage-group-note">these point at a folder that no longer exists — edit one to move it.</span>
+				}
+				if group.Removable {
+					<button
+						type="button"
+						class="btn btn-sm btn-ghost manage-group-remove"
+						aria-label={ "remove folder " + group.Label }
+						hx-get={ "/folders/" + group.Key + "/confirm-delete" }
+						hx-target={ "#" + group.DOMID }
+						hx-swap="outerHTML"
+					>remove folder</button>
+				}
+			</div>
+		</td>
+	</tr>
+}
+
+// A folder with no feeds used to render as a heading with nothing under
+// it — a dead end that looked like a bug. It says so instead, and offers
+// the one action that resolves it.
+templ manageEmptyRow(group manageGroup) {
+	<tr class="manage-empty-row" role="row" data-row="empty" data-folder={ group.Key }>
+		<td role="cell" colspan="4">
+			<div class="manage-empty-inner">
+				no feeds in this folder.
 				<button
-					class="manage-folder-del"
-					hx-get={ "/folders/" + folder.ID + "/confirm-delete" }
-					hx-target={ "#manage-folder-" + folder.ID }
+					type="button"
+					class="manage-inline-add"
+					hx-get="/feeds/new"
+					hx-target="#modal"
+					hx-swap="innerHTML"
+				>add one</button>
+			</div>
+		</td>
+	</tr>
+}
+
+// The data-* attributes are the filter's index: manage.js matches against
+// title, url and folder label without touching the server. They are
+// repeated on the edit and confirm fragments so a row that is mid-edit
+// still filters correctly.
+templ manageFeedRow(feed store.Feed, group manageGroup) {
+	<tr
+		class="manage-row"
+		role="row"
+		id={ "manage-feed-" + feed.ID }
+		data-row="feed"
+		data-folder={ group.Key }
+		data-folder-label={ group.Label }
+		data-title={ feed.Title }
+		data-url={ feed.URL }
+	>
+		<th class="mt-feed" role="rowheader" scope="row">
+			<span class="manage-title no-lower" title={ feed.Title }>{ feed.Title }</span>
+		</th>
+		<td class="mt-url" role="cell">
+			// the full url is in the title attribute; the visible one is cut
+			// in css, where the cut is made of glyphs and reverses itself
+			// when the column is wide. TruncateURL cut at 40 *bytes* and
+			// could slice a multi-byte character in half.
+			<span class="manage-url no-lower" title={ feed.URL }>{ feed.URL }</span>
+		</td>
+		<td class="mt-folder" role="cell">
+			<span class="mt-label">folder</span>
+			if group.Unfiled {
+				<span class="manage-folder-tag manage-folder-tag-unfiled">unfiled</span>
+			} else {
+				<span class="manage-folder-tag no-lower">{ group.Label }</span>
+			}
+		</td>
+		<td class="mt-act" role="cell">
+			<div class="manage-acts">
+				<button
+					type="button"
+					class="btn btn-sm btn-ghost"
+					aria-label={ "edit " + feed.Title }
+					hx-get={ "/feeds/" + feed.ID + "/edit" }
+					hx-target={ "#manage-feed-" + feed.ID }
+					hx-swap="outerHTML"
+				>edit</button>
+				<button
+					type="button"
+					class="btn btn-sm btn-ghost manage-act-danger"
+					aria-label={ "unsubscribe from " + feed.Title }
+					hx-get={ "/feeds/" + feed.ID + "/confirm-delete" }
+					hx-target={ "#manage-feed-" + feed.ID }
 					hx-swap="outerHTML"
 				>remove</button>
-			}
-		</div>
-		<div class="manage-grid">
-			for _, feed := range feeds {
-				if feed.Folder == folder.ID {
-					@manageFeedCard(feed, folder)
-				}
-			}
-		</div>
-	</div>
-}
-
-templ manageFeedCard(feed store.Feed, folder store.Folder) {
-	<div class="manage-card" id={ "manage-feed-" + feed.ID }>
-		<div class="manage-card-body">
-			<div class="manage-card-title">{ feed.Title }</div>
-			<div class="manage-card-url">{ TruncateURL(feed.URL) }</div>
-			<div class="manage-card-meta">
-				<span>{ folder.Label }</span>
 			</div>
-		</div>
-		<div class="manage-card-footer">
-			<button
-				class="manage-btn"
-				hx-get={ "/feeds/" + feed.ID + "/edit" }
-				hx-target={ "#manage-feed-" + feed.ID }
-				hx-swap="outerHTML"
-			>edit</button>
-			<button
-				class="manage-btn danger"
-				hx-get={ "/feeds/" + feed.ID + "/confirm-delete" }
-				hx-target={ "#manage-feed-" + feed.ID }
-				hx-swap="outerHTML"
-			>unsubscribe</button>
-		</div>
-	</div>
+		</td>
+	</tr>
 }
 
 templ ManageFeedConfirmDelete(feed store.Feed) {
-	<div class="manage-card confirming" id={ "manage-feed-" + feed.ID }>
-		<div class="manage-card-body">
-			<div class="manage-card-warn">unsubscribe?</div>
-			<div class="manage-card-warn-sub">
-				remove <strong>{ feed.Title }</strong> and all its items. this cannot be undone.
+	<tr
+		class="manage-row confirming"
+		role="row"
+		id={ "manage-feed-" + feed.ID }
+		data-row="feed"
+		data-title={ feed.Title }
+		data-url={ feed.URL }
+	>
+		<td class="mt-panel" role="cell" colspan="4">
+			<div class="manage-panel" role="group" aria-label="confirm unsubscribe">
+				<div class="manage-panel-text">
+					<p class="manage-warn-title">unsubscribe?</p>
+					<p class="manage-warn-text">
+						removes <strong class="no-lower">{ feed.Title }</strong> and every item it has stored. this cannot be undone.
+					</p>
+				</div>
+				<div class="manage-panel-acts">
+					<button
+						type="button"
+						class="btn btn-sm"
+						autofocus
+						hx-get="/manage"
+						hx-target="#main"
+						hx-swap="outerHTML"
+					>cancel</button>
+					<button
+						type="button"
+						class="btn btn-sm btn-danger-fill"
+						aria-label={ "unsubscribe from " + feed.Title }
+						hx-delete={ "/feeds/" + feed.ID }
+						hx-target="#main"
+						hx-swap="outerHTML"
+					>unsubscribe</button>
+				</div>
 			</div>
-		</div>
-		<div class="manage-card-footer">
-			<button
-				class="manage-btn"
-				hx-get="/manage"
-				hx-target="#main"
-				hx-swap="outerHTML"
-			>cancel</button>
-			<button
-				class="manage-btn danger-fill"
-				hx-delete={ "/feeds/" + feed.ID }
-				hx-target="#main"
-				hx-swap="outerHTML"
-			>unsubscribe →</button>
-		</div>
-	</div>
+		</td>
+	</tr>
 }
 
 templ ManageFeedEdit(feed store.Feed, folders []store.Folder) {
-	<div class="manage-card editing" id={ "manage-feed-" + feed.ID }>
-		<form
-			hx-put={ "/feeds/" + feed.ID }
-			hx-target="#main"
-			hx-swap="outerHTML"
-		>
-			<div class="manage-card-body">
-				<label>name</label>
-				<input type="text" name="title" value={ feed.Title }/>
-				<label>url</label>
-				<input type="url" name="url" value={ feed.URL }/>
-				<label>folder</label>
-				@FolderPicker(folders, feed.Folder)
-			</div>
-			<div class="manage-card-footer">
-				<button
-					type="button"
-					class="manage-btn"
-					hx-get="/manage"
-					hx-target="#main"
-					hx-swap="outerHTML"
-				>cancel</button>
-				<button type="submit" class="manage-btn primary">save</button>
-			</div>
-		</form>
-	</div>
+	<tr
+		class="manage-row editing"
+		role="row"
+		id={ "manage-feed-" + feed.ID }
+		data-row="feed"
+		data-folder={ feed.Folder }
+		data-folder-label={ manageFolderLabel(folders, feed.Folder) }
+		data-title={ feed.Title }
+		data-url={ feed.URL }
+	>
+		<td class="mt-panel" role="cell" colspan="4">
+			<form
+				class="manage-panel manage-edit"
+				hx-put={ "/feeds/" + feed.ID }
+				hx-target="#main"
+				hx-swap="outerHTML"
+			>
+				<div class="manage-edit-fields">
+					<div class="manage-field">
+						<label class="field-label" for={ "feed-title-" + feed.ID }>name</label>
+						<input
+							class="field"
+							type="text"
+							id={ "feed-title-" + feed.ID }
+							name="title"
+							value={ feed.Title }
+							autocomplete="off"
+							autofocus
+						/>
+					</div>
+					<div class="manage-field">
+						<label class="field-label" for={ "feed-url-" + feed.ID }>url</label>
+						<input
+							class="field"
+							type="url"
+							id={ "feed-url-" + feed.ID }
+							name="url"
+							value={ feed.URL }
+							autocomplete="off"
+							spellcheck="false"
+						/>
+					</div>
+					// FolderPicker renders its own <label for>; a second one
+					// here would leave the select with two names.
+					<div class="manage-field manage-field-picker">
+						@FolderPicker(folders, feed.Folder)
+					</div>
+				</div>
+				<div class="manage-panel-acts">
+					<button
+						type="button"
+						class="btn btn-sm"
+						hx-get="/manage"
+						hx-target="#main"
+						hx-swap="outerHTML"
+					>cancel</button>
+					<button type="submit" class="btn btn-sm btn-primary">save</button>
+				</div>
+			</form>
+		</td>
+	</tr>
 }
 
+// The folder confirm replaces only the folder's head row, so the feeds it
+// is about to take with it stay listed underneath while the question is
+// on screen. Replacing the whole group would hide exactly the information
+// the reader needs to answer it.
 templ ManageFolderConfirmDelete(folder store.Folder, feedCount int) {
-	<div class="manage-folder confirming" id={ "manage-folder-" + folder.ID }>
-		<div class="manage-card" style="border-color:var(--err)">
-			<div class="manage-card-body">
-				<div class="manage-card-warn">remove folder?</div>
-				<div class="manage-card-warn-sub">
-					delete <strong>{ folder.Label }</strong> and all its feeds ({ fmt.Sprintf("%d", feedCount) } feeds and their items). this cannot be undone.
+	<tr
+		class="manage-group confirming"
+		role="row"
+		id={ "manage-folder-" + folder.ID }
+		data-row="group"
+		data-folder={ folder.ID }
+	>
+		<td class="manage-group-cell mt-panel" role="cell" colspan="4">
+			<div class="manage-panel" role="group" aria-label="confirm remove folder">
+				<div class="manage-panel-text">
+					<p class="manage-warn-title">remove folder?</p>
+					<p class="manage-warn-text">
+						removes <strong class="no-lower">{ folder.Label }</strong>, the
+						<span class="tnum">{ manageCount(feedCount, "feed", "feeds") }</span>
+						inside it, and every item those feeds have stored. this cannot be undone.
+					</p>
+				</div>
+				<div class="manage-panel-acts">
+					<button
+						type="button"
+						class="btn btn-sm"
+						autofocus
+						hx-get="/manage"
+						hx-target="#main"
+						hx-swap="outerHTML"
+					>cancel</button>
+					<button
+						type="button"
+						class="btn btn-sm btn-danger-fill"
+						aria-label={ "remove folder " + folder.Label }
+						hx-delete={ "/folders/" + folder.ID }
+						hx-target="#main"
+						hx-swap="outerHTML"
+					>remove folder</button>
 				</div>
 			</div>
-			<div class="manage-card-footer">
-				<button
-					class="manage-btn"
-					hx-get="/manage"
-					hx-target="#main"
-					hx-swap="outerHTML"
-				>cancel</button>
-				<button
-					class="manage-btn danger-fill"
-					hx-delete={ "/folders/" + folder.ID }
-					hx-target="#main"
-					hx-swap="outerHTML"
-				>remove folder →</button>
-			</div>
-		</div>
-	</div>
+		</td>
+	</tr>
 }

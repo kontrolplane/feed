@@ -1,35 +1,59 @@
 package templates
 
+// AddFolderModal renders a native <dialog>. app.js calls showModal() on
+// any <dialog class="modal"> htmx swaps into #modal, so the focus trap,
+// Escape, the top layer, the backdrop and inert-ing the page behind all
+// come from the platform rather than from the hand-rolled scrim this
+// replaces.
 templ AddFolderModal() {
-	<div class="scrim" onclick="document.getElementById('modal').innerHTML=''">
-		<div class="modal" onclick="event.stopPropagation()">
-			<div class="modal-head">
-				<span>[ new / folder ]</span>
-				<span class="close" onclick="document.getElementById('modal').innerHTML=''">✕</span>
-			</div>
-			<div class="modal-body">
-				<h2>create a folder.</h2>
-				<div class="sub">organise your feeds into groups.</div>
-				<form
-					hx-post="/folders"
-					hx-target="#sidebar"
-					hx-swap="outerHTML"
-					hx-on::after-request="document.getElementById('modal').innerHTML=''"
-				>
-					<label>folder name</label>
+	<dialog id="add-folder-modal" class="modal" aria-labelledby="add-folder-title">
+		<header class="modal-head">
+			<span class="eyebrow">new / folder</span>
+			// wrapped in method="dialog" so the close control still works
+			// if app.js has not loaded yet; data-close-modal is what app.js
+			// binds, and closing an already-closed dialog is a no-op.
+			<form method="dialog" class="modal-close-form">
+				<button type="submit" class="btn-icon" aria-label="close" data-close-modal>
+					<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true" focusable="false">
+						<path d="M2 2 L12 12 M12 2 L2 12"></path>
+					</svg>
+				</button>
+			</form>
+		</header>
+		<div class="modal-body scroll-y">
+			<h2 id="add-folder-title" class="modal-title">create a folder.</h2>
+			<p class="pane-lead modal-lead">a group in the sidebar. every feed sits in exactly one.</p>
+			<form
+				class="modal-form"
+				hx-post="/folders"
+				hx-target="#sidebar"
+				hx-swap="outerHTML"
+				hx-disabled-elt="find button[type='submit']"
+				hx-on::after-request="if(event.detail.successful){this.closest('dialog').close()}else{this.querySelector('[data-modal-error]').hidden=false}"
+			>
+				<div class="modal-field">
+					<label class="field-label" for="add-folder-name">folder name</label>
 					<input
+						id="add-folder-name"
+						class="field"
 						type="text"
 						name="name"
 						placeholder="e.g. tech, news, blogs"
+						autocomplete="off"
 						required
 						autofocus
 					/>
-					<div class="btns">
-						<button type="button" class="ghost" onclick="document.getElementById('modal').innerHTML=''">cancel</button>
-						<button type="submit" class="primary">create →</button>
-					</div>
-				</form>
-			</div>
+				</div>
+				// the old version cleared #modal on every after-request,
+				// success or not, so a failed create looked identical to a
+				// successful one. now the dialog only closes on success and
+				// the failure is said out loud.
+				<p class="modal-error" role="alert" data-modal-error hidden>could not create the folder. the server rejected the request.</p>
+				<div class="modal-actions">
+					<button type="button" class="btn btn-ghost" data-close-modal>cancel</button>
+					<button type="submit" class="btn btn-primary">create <i class="arw"></i></button>
+				</div>
+			</form>
 		</div>
-	</div>
+	</dialog>
 }
