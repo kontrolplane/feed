@@ -11,9 +11,7 @@
 Supports substring search over item titles, authors and abstracts, keyboard-first navigation, timeline filtering (today, yesterday, last week, last month), feed management with inline editing, OPML import/export, dark mode, and deploys to Kubernetes via the included Helm chart with optional CloudNativePG integration.
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://github.com/user-attachments/assets/cd1c129a-bf15-402e-864b-1712022a9f31">
-  <source media="(prefers-color-scheme: light)" srcset="https://github.com/user-attachments/assets/ae1012c3-2d11-4cec-b32a-986951935da4">
-  <img alt="Description of your image" src="https://github.com/user-attachments/assets/ae1012c3-2d11-4cec-b32a-986951935da4">
+  <img alt="Description of your image" src="https://github.com/user-attachments/assets/441e19f9-2250-47d4-9f3d-1e6ebd690037">
 </picture>
 
 ## keyboard shortcuts
